@@ -1,3 +1,4 @@
+
 import React, { createContext, useContext, useState, useEffect } from 'react';
 import { toast } from 'sonner';
 import {
@@ -80,7 +81,9 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
   // Classes state
   const [allClasses, setAllClasses] = useState<ClassInfo[]>(() => {
     const saved = localStorage.getItem(STORAGE_KEYS.ALL_CLASSES);
-    return saved ? JSON.parse(saved) : [];
+    const classes = saved ? JSON.parse(saved) : [];
+    console.log('Loaded classes from localStorage:', classes.length);
+    return classes;
   });
   const [filteredClasses, setFilteredClasses] = useState<ClassInfo[]>([]);
   const [selectedClassIds, setSelectedClassIds] = useState<string[]>([]);
@@ -134,6 +137,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
       // Process file based on type
       if (type === 'rtm') {
         const functions = await processRTMFile(file);
+        console.log('Setting system functions:', functions);
         setSystemFunctions(functions);
       } else if (type === 'sequenceDiagram') {
         const diagram = await processSequenceDiagramFile(file);
@@ -147,8 +151,12 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
         }
       } else if (type === 'classDiagram') {
         const classes = await processClassDiagramFile(file);
-        if (classes) {
+        if (classes && classes.length > 0) {
+          console.log('Setting classes from class diagram:', classes.length, 'classes');
+          console.log('Class names:', classes.map(c => c.name));
           setAllClasses(classes);
+        } else {
+          console.log('No classes extracted from class diagram');
         }
       }
       
@@ -329,12 +337,14 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
       allClasses.length > 0 &&
       sequenceDiagrams.length > 0
     ) {
-      console.log('=== Updating class relationships ===');
+      console.log('=== Starting class relationship mapping ===');
       const updatedClasses = mapFunctionsToClasses(
         systemFunctions,
         sequenceDiagrams,
         allClasses
       );
+      console.log('=== Mapping complete, updating classes ===');
+      console.log('Classes with relationships:', updatedClasses.filter(c => c.relatedFunctions.length > 0).map(c => ({ name: c.name, functions: c.relatedFunctions })));
       setAllClasses(updatedClasses);
     }
   }, [systemFunctions, sequenceDiagrams]);
@@ -349,6 +359,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
   }, [systemFunctions]);
   
   useEffect(() => {
+    console.log('Saving classes to localStorage:', allClasses.length);
     localStorage.setItem(STORAGE_KEYS.ALL_CLASSES, JSON.stringify(allClasses));
   }, [allClasses]);
   
