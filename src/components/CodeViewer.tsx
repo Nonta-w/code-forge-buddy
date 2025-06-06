@@ -19,6 +19,14 @@ import { toast } from 'sonner';
 import { ScrollArea } from '@/components/ui/scroll-area';
 
 export default function CodeViewer() {
+  const openAllSessions = () => {
+    setOpenSessions(new Set(codeSessions.map(session => session.id)));
+  };
+
+  const closeAllSessions = () => {
+    setOpenSessions(new Set());
+  };
+
   const { codeSessions } = useApp();
   const [openSessions, setOpenSessions] = useState<Set<string>>(
     new Set(codeSessions.map(session => session.id))
@@ -102,14 +110,34 @@ export default function CodeViewer() {
           <div className="flex items-center gap-2">
             <FileCode size={20} /> Generated Code Sessions
           </div>
-          <Button
-            size="sm"
-            onClick={downloadAllCode}
-            className="flex items-center gap-1"
-          >
-            <Download size={16} />
-            <span>Download All</span>
-          </Button>
+          <div className="flex items-center gap-2">
+            <Button
+              size="sm"
+              variant="outline"
+              onClick={openAllSessions}
+              className="flex items-center gap-1"
+            >
+              <ChevronDown size={14} />
+              <span>Open All</span>
+            </Button>
+            <Button
+              size="sm"
+              variant="outline"
+              onClick={closeAllSessions}
+              className="flex items-center gap-1"
+            >
+              <ChevronUp size={14} />
+              <span>Close All</span>
+            </Button>
+            <Button
+              size="sm"
+              onClick={downloadAllCode}
+              className="flex items-center gap-1"
+            >
+              <Download size={16} />
+              <span>Download All</span>
+            </Button>
+          </div>
         </CardTitle>
       </CardHeader>
       <CardContent className="p-0">
