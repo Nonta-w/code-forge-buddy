@@ -7,14 +7,21 @@ import {
   SelectTrigger,
   SelectValue
 } from '@/components/ui/select';
+import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
-import { CodeIcon } from 'lucide-react'; // Changed to use CodeIcon instead of Function
+import { CodeIcon } from 'lucide-react';
 
 export default function FunctionSelection() {
-  const { systemFunctions, selectedFunctionId, setSelectedFunctionId } = useApp();
+  const { systemFunctions, selectedFunctionId, setSelectedFunctionId, setCurrentStep } = useApp();
 
   const handleFunctionChange = (value: string) => {
     setSelectedFunctionId(value);
+  };
+
+  const handleProceedToClassSelection = () => {
+    if (selectedFunctionId) {
+      setCurrentStep(3);
+    }
   };
 
   return (
@@ -49,16 +56,25 @@ export default function FunctionSelection() {
             </div>
 
             {selectedFunctionId && (
-              <div className="bg-blue-50 p-4 rounded-md">
-                <h4 className="font-medium mb-2">Related Sequence Diagrams:</h4>
-                <ul className="list-disc pl-5">
-                  {systemFunctions
-                    .find((f) => f.id === selectedFunctionId)
-                    ?.sequenceDiagramNames.map((name, index) => (
-                      <li key={index}>{name}</li>
-                    ))}
-                </ul>
-              </div>
+              <>
+                <div className="bg-blue-50 p-4 rounded-md">
+                  <h4 className="font-medium mb-2">Related Sequence Diagrams:</h4>
+                  <ul className="list-disc pl-5">
+                    {systemFunctions
+                      .find((f) => f.id === selectedFunctionId)
+                      ?.sequenceDiagramNames.map((name, index) => (
+                        <li key={index}>{name}</li>
+                      ))}
+                  </ul>
+                </div>
+                
+                <Button 
+                  onClick={handleProceedToClassSelection}
+                  className="w-full"
+                >
+                  Proceed to Class Selection
+                </Button>
+              </>
             )}
           </div>
         ) : (

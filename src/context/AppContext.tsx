@@ -43,7 +43,7 @@ interface AppContextType {
   uploadedFiles: UploadedFile[];
   addFile: (file: File, type: FileType) => Promise<void>;
   removeFile: (id: string) => void;
-  resetAll: () => void; // Add reset function
+  resetAll: () => void;
   
   // RTM and Functions
   systemFunctions: SystemFunction[];
@@ -226,6 +226,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
       
       const selectedClasses = allClasses.filter(cls => selectedClassIds.includes(cls.id));
       const newGeneratedCodes: GeneratedCode[] = [];
+      const generatedFileNames = new Set<string>(); // Track generated file names to prevent duplicates
       
       // Create a map of class names to class objects for quick lookup
       const classMap = new Map<string, ClassInfo>();
@@ -233,9 +234,9 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
         classMap.set(cls.name, cls);
       });
       
-      // Find which classes need stubs and drivers
+      // Find which classes need stubs and drivers based on interaction with selected classes
       const selectedClassNames = new Set(selectedClasses.map(cls => cls.name));
-      const callGraph = new Map<string, Set<string>>();
+      const callGraph = new Map<string, Set<string>>(); // caller -> called classes
       
       // Build call graph from sequence diagrams
       sequenceDiagrams.forEach(diagram => {
@@ -244,6 +245,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
           const toObj = diagram.objects.find(obj => obj.id === message.to);
           
           if (fromObj && toObj && fromObj.type && toObj.type) {
+            // Record that fromObj.type calls toObj.type
             if (!callGraph.has(fromObj.type)) {
               callGraph.set(fromObj.type, new Set<string>());
             }
@@ -252,58 +254,80 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
         });
       });
       
-      // Generate stubs for classes that are called by selected classes but not in selection
-      selectedClasses.forEach(selectedClass => {
-        const calledClasses = callGraph.get(selectedClass.name) || new Set<string>();
+      console.log('Call graph:', callGraph);
+      console.log('Selected classes for testing:', selectedClassNames);
+      
+      // For each selected class (class under test), generate needed stubs and drivers
+      selectedClasses.forEach(classUnderTest => {
+        console.log(`Generating stubs and drivers for class under test: ${classUnderTest.name}`);
         
+        // 1. Generate STUBS for classes that are CALLED BY the class under test
+        const calledClasses = callGraph.get(classUnderTest.name) || new Set<string>();
         calledClasses.forEach(calledClassName => {
+          // Only create stub if the called class is not also under test
           if (!selectedClassNames.has(calledClassName)) {
             const calledClass = classMap.get(calledClassName);
             if (calledClass) {
-              const stubCode = generateStubCode(calledClass);
-              newGeneratedCodes.push({
-                id: generateId(),
-                fileName: `${calledClassName}Stub.java`,
-                fileContent: stubCode,
-                type: 'stub',
-                timestamp: new Date(),
-                relatedClass: calledClassName
-              });
+              const stubFileName = `${calledClassName}Stub.java`;
+              if (!generatedFileNames.has(stubFileName)) {
+                const stubCode = generateStubCode(calledClass);
+                newGeneratedCodes.push({
+                  id: generateId(),
+                  fileName: stubFileName,
+                  fileContent: stubCode,
+                  type: 'stub',
+                  timestamp: new Date(),
+                  relatedClass: calledClassName
+                });
+                generatedFileNames.add(stubFileName);
+                console.log(`Generated stub for ${calledClassName} (called by ${classUnderTest.name})`);
+              }
+            }
+          }
+        });
+        
+        // 2. Generate DRIVERS for classes that CALL the class under test
+        callGraph.forEach((calledClasses, callerClassName) => {
+          if (calledClasses.has(classUnderTest.name)) {
+            // This caller class calls our class under test
+            // Only create driver if the caller is not also under test
+            if (!selectedClassNames.has(callerClassName)) {
+              const driverFileName = `${classUnderTest.name}Driver.java`;
+              if (!generatedFileNames.has(driverFileName)) {
+                const driverCode = generateDriverCode(classUnderTest);
+                newGeneratedCodes.push({
+                  id: generateId(),
+                  fileName: driverFileName,
+                  fileContent: driverCode,
+                  type: 'driver',
+                  timestamp: new Date(),
+                  relatedClass: classUnderTest.name
+                });
+                generatedFileNames.add(driverFileName);
+                console.log(`Generated driver for ${classUnderTest.name} (called by ${callerClassName})`);
+              }
             }
           }
         });
       });
       
-      // Generate drivers for classes that call selected classes but not in selection
-      selectedClasses.forEach(selectedClass => {
-        callGraph.forEach((calledClasses, callerClassName) => {
-          if (calledClasses.has(selectedClass.name) && !selectedClassNames.has(callerClassName)) {
-            // Generate driver for selected class
+      // If no stubs or drivers were generated, create at least a basic driver for each selected class
+      if (newGeneratedCodes.length === 0) {
+        selectedClasses.forEach(selectedClass => {
+          const driverFileName = `${selectedClass.name}Driver.java`;
+          if (!generatedFileNames.has(driverFileName)) {
             const driverCode = generateDriverCode(selectedClass);
             newGeneratedCodes.push({
               id: generateId(),
-              fileName: `${selectedClass.name}Driver.java`,
+              fileName: driverFileName,
               fileContent: driverCode,
               type: 'driver',
               timestamp: new Date(),
               relatedClass: selectedClass.name
             });
+            generatedFileNames.add(driverFileName);
+            console.log(`Generated default driver for ${selectedClass.name}`);
           }
-        });
-      });
-      
-      // If no stubs or drivers were generated, create at least a driver for each selected class
-      if (newGeneratedCodes.length === 0) {
-        selectedClasses.forEach(selectedClass => {
-          const driverCode = generateDriverCode(selectedClass);
-          newGeneratedCodes.push({
-            id: generateId(),
-            fileName: `${selectedClass.name}Driver.java`,
-            fileContent: driverCode,
-            type: 'driver',
-            timestamp: new Date(),
-            relatedClass: selectedClass.name
-          });
         });
       }
 
@@ -320,7 +344,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
       setGeneratedCodes(prev => [...prev, ...newGeneratedCodes]);
       setCodeSessions(prev => [...prev, newSession]);
       setCurrentStep(4); // Move to code view
-      toast.success(`Generated ${newGeneratedCodes.length} code files for: ${sessionName}`);
+      toast.success(`Generated ${newGeneratedCodes.length} code files for testing: ${sessionName}`);
     } catch (error) {
       console.error('Error generating code:', error);
       toast.error('Failed to generate code');
@@ -345,7 +369,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     setIsGenerating(false);
   };
   
-  // Update filtered classes when selected function changes
+  // Update filtered classes when selected function changes (remove auto step progression)
   useEffect(() => {
     if (selectedFunctionId) {
       console.log('=== Filtering classes for function ===');
@@ -362,8 +386,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
       // Clear selected class ids
       setSelectedClassIds([]);
       
-      // Automatically move to step 3 when a function is selected
-      setCurrentStep(3);
+      // Don't automatically move to step 3 - let user click button
     } else {
       setFilteredClasses([]);
     }
@@ -428,7 +451,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     uploadedFiles,
     addFile,
     removeFile,
-    resetAll, // Add reset function
+    resetAll,
     systemFunctions,
     selectedFunctionId,
     setSelectedFunctionId,
