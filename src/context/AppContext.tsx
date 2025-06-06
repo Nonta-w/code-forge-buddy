@@ -1,4 +1,3 @@
-
 import React, { createContext, useContext, useState, useEffect } from 'react';
 import { toast } from 'sonner';
 import {
@@ -139,7 +138,12 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
       } else if (type === 'sequenceDiagram') {
         const diagram = await processSequenceDiagramFile(file);
         if (diagram) {
-          setSequenceDiagrams(prev => [...prev, diagram]);
+          console.log('Adding sequence diagram to state:', diagram);
+          setSequenceDiagrams(prev => {
+            const updated = [...prev, diagram];
+            console.log('Updated sequence diagrams state:', updated);
+            return updated;
+          });
         }
       } else if (type === 'classDiagram') {
         const classes = await processClassDiagramFile(file);
@@ -292,10 +296,16 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
   // Update filtered classes when selected function changes
   useEffect(() => {
     if (selectedFunctionId) {
+      console.log('=== Filtering classes for function ===');
+      console.log('Selected function ID:', selectedFunctionId);
+      console.log('All classes:', allClasses.map(c => ({ name: c.name, relatedFunctions: c.relatedFunctions })));
+      
       // Filter classes related to the selected function
       const filtered = allClasses.filter(
         cls => cls.relatedFunctions.includes(selectedFunctionId)
       );
+      
+      console.log('Filtered classes:', filtered.map(c => c.name));
       setFilteredClasses(filtered);
       // Clear selected class ids
       setSelectedClassIds([]);
@@ -309,11 +319,17 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
   
   // Update class relationships when RTM, classes, and sequence diagrams are all loaded
   useEffect(() => {
+    console.log('=== Checking for mapping update ===');
+    console.log('System functions:', systemFunctions.length);
+    console.log('All classes:', allClasses.length);
+    console.log('Sequence diagrams:', sequenceDiagrams.length);
+    
     if (
       systemFunctions.length > 0 &&
       allClasses.length > 0 &&
       sequenceDiagrams.length > 0
     ) {
+      console.log('=== Updating class relationships ===');
       const updatedClasses = mapFunctionsToClasses(
         systemFunctions,
         sequenceDiagrams,

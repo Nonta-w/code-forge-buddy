@@ -550,6 +550,11 @@ export const mapFunctionsToClasses = (
   sequenceDiagrams: SequenceDiagram[],
   classes: ClassInfo[]
 ): ClassInfo[] => {
+  console.log('=== Function to Class Mapping Debug ===');
+  console.log('Functions:', functions);
+  console.log('Sequence Diagrams:', sequenceDiagrams);
+  console.log('Classes:', classes.map(c => ({ name: c.name, id: c.id })));
+  
   // Create a deep copy of classes to avoid mutating the original
   const updatedClasses = JSON.parse(JSON.stringify(classes));
   
@@ -557,22 +562,30 @@ export const mapFunctionsToClasses = (
   const diagramMap = new Map<string, SequenceDiagram>();
   sequenceDiagrams.forEach(diagram => {
     diagramMap.set(diagram.name, diagram);
+    console.log(`Mapped diagram: ${diagram.name} with ${diagram.objects.length} objects`);
   });
   
   // For each function, find related classes through sequence diagrams
   functions.forEach(func => {
+    console.log(`\nProcessing function: ${func.name} (${func.id})`);
+    console.log(`Function sequence diagrams: ${func.sequenceDiagramNames}`);
+    
     const diagramNames = func.sequenceDiagramNames;
     
     // Get set of class names from the sequence diagrams
     const relatedClassNames = new Set<string>();
     
     diagramNames.forEach(diagramName => {
+      console.log(`Looking for diagram: ${diagramName}`);
       const diagram = diagramMap.get(diagramName);
       if (diagram) {
+        console.log(`Found diagram: ${diagramName} with objects:`, diagram.objects.map(o => ({ name: o.name, type: o.type })));
+        
         // Add all object types as related classes
         diagram.objects.forEach(obj => {
-          if (obj.type && obj.type !== 'unknown') {
+          if (obj.type && obj.type !== 'unknown' && obj.type !== 'ACTOR' && obj.type !== 'REF') {
             relatedClassNames.add(obj.type);
+            console.log(`Added class from object: ${obj.type} (from object: ${obj.name})`);
           }
         });
         
@@ -582,22 +595,50 @@ export const mapFunctionsToClasses = (
             const refDiagram = diagramMap.get(ref.diagramName);
             if (refDiagram) {
               refDiagram.objects.forEach(obj => {
-                if (obj.type && obj.type !== 'unknown') {
+                if (obj.type && obj.type !== 'unknown' && obj.type !== 'ACTOR' && obj.type !== 'REF') {
                   relatedClassNames.add(obj.type);
+                  console.log(`Added class from reference: ${obj.type}`);
                 }
               });
             }
           }
         });
+      } else {
+        console.log(`Diagram not found: ${diagramName}`);
+        // Try to find diagram with partial name matching
+        const possibleDiagrams = sequenceDiagrams.filter(d => 
+          d.name.includes(diagramName) || diagramName.includes(d.name)
+        );
+        if (possibleDiagrams.length > 0) {
+          console.log(`Found possible matches:`, possibleDiagrams.map(d => d.name));
+          possibleDiagrams.forEach(diagram => {
+            diagram.objects.forEach(obj => {
+              if (obj.type && obj.type !== 'unknown' && obj.type !== 'ACTOR' && obj.type !== 'REF') {
+                relatedClassNames.add(obj.type);
+                console.log(`Added class from partial match: ${obj.type}`);
+              }
+            });
+          });
+        }
       }
     });
+    
+    console.log(`Related class names for function ${func.name}:`, Array.from(relatedClassNames));
     
     // Update classes with related functions
     updatedClasses.forEach((cls: ClassInfo) => {
       if (relatedClassNames.has(cls.name)) {
         cls.relatedFunctions = [...new Set([...cls.relatedFunctions, func.id])];
+        console.log(`Added function ${func.id} to class ${cls.name}`);
       }
     });
+  });
+  
+  console.log('=== Final mapping results ===');
+  updatedClasses.forEach((cls: ClassInfo) => {
+    if (cls.relatedFunctions.length > 0) {
+      console.log(`Class ${cls.name} related to functions: ${cls.relatedFunctions}`);
+    }
   });
   
   return updatedClasses;
