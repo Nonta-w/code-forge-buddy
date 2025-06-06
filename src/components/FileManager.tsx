@@ -1,4 +1,3 @@
-
 import { useApp } from '@/context/AppContext';
 import { Button } from '@/components/ui/button';
 import {
@@ -10,8 +9,7 @@ import {
   TableRow
 } from '@/components/ui/table';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
-import { FileType } from '@/lucide-react';
-import { Trash2 } from 'lucide-react';
+import { FileIcon, Trash2 } from 'lucide-react';
 
 export default function FileManager() {
   const { uploadedFiles, removeFile } = useApp();
@@ -43,7 +41,7 @@ export default function FileManager() {
     <Card className="w-full">
       <CardHeader>
         <CardTitle className="text-xl font-semibold flex items-center gap-2">
-          <FileType size={20} /> Uploaded Files
+          <FileIcon size={20} /> Uploaded Files
         </CardTitle>
       </CardHeader>
       <CardContent>

@@ -1,4 +1,3 @@
-
 import React, { createContext, useContext, useState, useEffect } from 'react';
 import { toast } from 'sonner';
 import {
@@ -18,6 +17,15 @@ import {
   generateDriverCode,
   generateId
 } from '@/utils/fileUtils';
+
+// Add local storage keys
+const STORAGE_KEYS = {
+  UPLOADED_FILES: 'stub_driver_uploaded_files',
+  SYSTEM_FUNCTIONS: 'stub_driver_system_functions',
+  SEQUENCE_DIAGRAMS: 'stub_driver_sequence_diagrams',
+  ALL_CLASSES: 'stub_driver_all_classes',
+  GENERATED_CODES: 'stub_driver_generated_codes'
+};
 
 interface AppContextType {
   // Files
@@ -56,22 +64,37 @@ const AppContext = createContext<AppContextType | undefined>(undefined);
 
 export function AppProvider({ children }: { children: React.ReactNode }) {
   // Files state
-  const [uploadedFiles, setUploadedFiles] = useState<UploadedFile[]>([]);
+  const [uploadedFiles, setUploadedFiles] = useState<UploadedFile[]>(() => {
+    const saved = localStorage.getItem(STORAGE_KEYS.UPLOADED_FILES);
+    return saved ? JSON.parse(saved) : [];
+  });
   
   // RTM state
-  const [systemFunctions, setSystemFunctions] = useState<SystemFunction[]>([]);
+  const [systemFunctions, setSystemFunctions] = useState<SystemFunction[]>(() => {
+    const saved = localStorage.getItem(STORAGE_KEYS.SYSTEM_FUNCTIONS);
+    return saved ? JSON.parse(saved) : [];
+  });
   const [selectedFunctionId, setSelectedFunctionId] = useState<string | null>(null);
   
   // Classes state
-  const [allClasses, setAllClasses] = useState<ClassInfo[]>([]);
+  const [allClasses, setAllClasses] = useState<ClassInfo[]>(() => {
+    const saved = localStorage.getItem(STORAGE_KEYS.ALL_CLASSES);
+    return saved ? JSON.parse(saved) : [];
+  });
   const [filteredClasses, setFilteredClasses] = useState<ClassInfo[]>([]);
   const [selectedClassIds, setSelectedClassIds] = useState<string[]>([]);
   
   // Sequence Diagrams state
-  const [sequenceDiagrams, setSequenceDiagrams] = useState<SequenceDiagram[]>([]);
+  const [sequenceDiagrams, setSequenceDiagrams] = useState<SequenceDiagram[]>(() => {
+    const saved = localStorage.getItem(STORAGE_KEYS.SEQUENCE_DIAGRAMS);
+    return saved ? JSON.parse(saved) : [];
+  });
   
   // Generated Code state
-  const [generatedCodes, setGeneratedCodes] = useState<GeneratedCode[]>([]);
+  const [generatedCodes, setGeneratedCodes] = useState<GeneratedCode[]>(() => {
+    const saved = localStorage.getItem(STORAGE_KEYS.GENERATED_CODES);
+    return saved ? JSON.parse(saved) : [];
+  });
   
   // UI state
   const [currentStep, setCurrentStep] = useState<number>(1);
@@ -291,6 +314,27 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
       setAllClasses(updatedClasses);
     }
   }, [systemFunctions, sequenceDiagrams]);
+  
+  // Save to localStorage whenever state changes
+  useEffect(() => {
+    localStorage.setItem(STORAGE_KEYS.UPLOADED_FILES, JSON.stringify(uploadedFiles));
+  }, [uploadedFiles]);
+  
+  useEffect(() => {
+    localStorage.setItem(STORAGE_KEYS.SYSTEM_FUNCTIONS, JSON.stringify(systemFunctions));
+  }, [systemFunctions]);
+  
+  useEffect(() => {
+    localStorage.setItem(STORAGE_KEYS.ALL_CLASSES, JSON.stringify(allClasses));
+  }, [allClasses]);
+  
+  useEffect(() => {
+    localStorage.setItem(STORAGE_KEYS.SEQUENCE_DIAGRAMS, JSON.stringify(sequenceDiagrams));
+  }, [sequenceDiagrams]);
+  
+  useEffect(() => {
+    localStorage.setItem(STORAGE_KEYS.GENERATED_CODES, JSON.stringify(generatedCodes));
+  }, [generatedCodes]);
   
   const value = {
     uploadedFiles,

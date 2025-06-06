@@ -1,5 +1,16 @@
 
-import { UploadedFile, FileType, SystemFunction, ClassInfo, SequenceDiagram } from '@/types';
+import { 
+  UploadedFile, 
+  FileType, 
+  SystemFunction, 
+  ClassInfo, 
+  SequenceDiagram,
+  ObjectNode,
+  Message,
+  Reference,
+  MethodInfo,
+  ParameterInfo
+} from '@/types';
 import { toast } from 'sonner';
 
 // Generate unique ID

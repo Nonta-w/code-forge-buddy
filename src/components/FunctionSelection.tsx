@@ -8,7 +8,7 @@ import {
   SelectValue
 } from '@/components/ui/select';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
-import { Function } from 'lucide-react';
+import { CodeIcon } from 'lucide-react'; // Changed to use CodeIcon instead of Function
 
 export default function FunctionSelection() {
   const { systemFunctions, selectedFunctionId, setSelectedFunctionId } = useApp();
@@ -21,7 +21,7 @@ export default function FunctionSelection() {
     <Card className="w-full">
       <CardHeader>
         <CardTitle className="text-xl font-semibold flex items-center gap-2">
-          <Function size={20} /> System Function Selection
+          <CodeIcon size={20} /> System Function Selection
         </CardTitle>
       </CardHeader>
       <CardContent>
