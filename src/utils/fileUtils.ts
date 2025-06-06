@@ -185,66 +185,196 @@ export const processSequenceDiagramFile = async (file: File): Promise<SequenceDi
       return null;
     }
     
+    console.log('Parsing Visual Paradigm sequence diagram XML...');
+    
+    // Check for Visual Paradigm structure
+    const projectElement = xmlDoc.getElementsByTagName('Project')[0];
+    if (!projectElement || projectElement.getAttribute('Xml_structure') !== 'simple') {
+      console.error('Not a valid Visual Paradigm XML file');
+      toast.error('Invalid Visual Paradigm XML format');
+      return null;
+    }
+    
     // Extract diagram name
     const diagramName = file.name.replace('.xml', '');
     const diagramId = generateId();
     
-    // Extract object nodes (lifelines)
-    const lifelines = xmlDoc.getElementsByTagName('lifeline');
+    // Find the interaction diagram
+    const diagramElements = xmlDoc.getElementsByTagName('InteractionDiagram');
+    if (diagramElements.length === 0) {
+      console.error('No InteractionDiagram found');
+      toast.error('No sequence diagram found in XML');
+      return null;
+    }
+    
+    const diagram = diagramElements[0];
+    const frameId = diagram.getAttribute('_rootFrame');
+    
+    console.log(`Processing diagram: ${diagramName}, frameId: ${frameId}`);
+    
+    // Find the frame in Models
+    const frames = xmlDoc.getElementsByTagName('Frame');
+    let frame = null;
+    for (let i = 0; i < frames.length; i++) {
+      if (frames[i].getAttribute('Id') === frameId) {
+        frame = frames[i];
+        break;
+      }
+    }
+    
+    if (!frame) {
+      console.error('Frame not found in Models');
+      toast.error('Invalid sequence diagram structure');
+      return null;
+    }
+    
+    // Extract objects from diagram shapes and map to model data
     const objects: ObjectNode[] = [];
+    const objectIdMap = new Map<string, string>(); // modelId -> objectNodeId
     
-    for (let i = 0; i < lifelines.length; i++) {
-      const lifeline = lifelines[i];
-      const id = lifeline.getAttribute('id') || generateId();
-      const name = lifeline.getAttribute('name') || `Object${i}`;
-      const type = lifeline.getAttribute('type') || 'unknown';
+    const shapes = diagram.getElementsByTagName('Shapes')[0];
+    if (shapes) {
+      // Process InteractionLifeLine (regular objects)
+      const lifeLines = shapes.getElementsByTagName('InteractionLifeLine');
+      for (let i = 0; i < lifeLines.length; i++) {
+        const lifeLine = lifeLines[i];
+        const objectName = lifeLine.getAttribute('Name') || `Object${i}`;
+        const modelId = lifeLine.getAttribute('Model');
+        
+        if (modelId) {
+          // Find the corresponding model in the frame
+          const lifeLineModels = frame.getElementsByTagName('InteractionLifeLine');
+          for (let j = 0; j < lifeLineModels.length; j++) {
+            const lifeLineModel = lifeLineModels[j];
+            if (lifeLineModel.getAttribute('Id') === modelId) {
+              // Get the base classifier (class name)
+              const baseClassifier = lifeLineModel.getElementsByTagName('BaseClassifier')[0];
+              if (baseClassifier) {
+                const classElement = baseClassifier.getElementsByTagName('Class')[0];
+                const className = classElement ? classElement.getAttribute('Name') || 'unknown' : 'unknown';
+                
+                const objectNodeId = generateId();
+                objects.push({
+                  id: objectNodeId,
+                  name: objectName,
+                  type: className
+                });
+                objectIdMap.set(modelId, objectNodeId);
+                console.log(`Added object: ${objectName} -> ${className}`);
+              }
+              break;
+            }
+          }
+        }
+      }
       
-      objects.push({
-        id,
-        name,
-        type
-      });
+      // Process InteractionActor (actors)
+      const actors = shapes.getElementsByTagName('InteractionActor');
+      for (let i = 0; i < actors.length; i++) {
+        const actor = actors[i];
+        const actorName = actor.getAttribute('Name') || `Actor${i}`;
+        const modelId = actor.getAttribute('Model');
+        
+        if (modelId) {
+          const objectNodeId = generateId();
+          objects.push({
+            id: objectNodeId,
+            name: actorName,
+            type: 'ACTOR'
+          });
+          objectIdMap.set(modelId, objectNodeId);
+          console.log(`Added actor: ${actorName}`);
+        }
+      }
+      
+      // Process InteractionOccurrence (REF objects)
+      const occurrences = shapes.getElementsByTagName('InteractionOccurrence');
+      for (let i = 0; i < occurrences.length; i++) {
+        const occurrence = occurrences[i];
+        const refName = occurrence.getAttribute('Name') || `Ref${i}`;
+        const modelId = occurrence.getAttribute('Model');
+        
+        if (modelId) {
+          const objectNodeId = generateId();
+          objects.push({
+            id: objectNodeId,
+            name: refName,
+            type: 'REF'
+          });
+          objectIdMap.set(modelId, objectNodeId);
+          console.log(`Added reference: ${refName}`);
+        }
+      }
     }
     
-    // Extract messages
-    const messageElements = xmlDoc.getElementsByTagName('message');
+    // Extract messages from ModelRelationshipContainer
     const messages: Message[] = [];
+    const modelContainers = xmlDoc.getElementsByTagName('ModelRelationshipContainer');
     
-    for (let i = 0; i < messageElements.length; i++) {
-      const message = messageElements[i];
-      const id = message.getAttribute('id') || generateId();
-      const from = message.getAttribute('source') || '';
-      const to = message.getAttribute('target') || '';
-      const name = message.getAttribute('name') || '';
-      const type = message.getAttribute('messageSort') || 'synchCall';
+    for (let i = 0; i < modelContainers.length; i++) {
+      const container = modelContainers[i];
+      const messageElements = container.getElementsByTagName('Message');
       
-      messages.push({
-        id,
-        from,
-        to,
-        name,
-        type
-      });
+      for (let j = 0; j < messageElements.length; j++) {
+        const messageElement = messageElements[j];
+        const messageId = generateId();
+        const messageName = messageElement.getAttribute('Name') || '';
+        const messageType = messageElement.getAttribute('Type') || 'Message';
+        
+        const fromModelId = messageElement.getAttribute('EndRelationshipFromMetaModelElement');
+        const toModelId = messageElement.getAttribute('EndRelationshipToMetaModelElement');
+        
+        const fromObjectId = objectIdMap.get(fromModelId || '') || '';
+        const toObjectId = objectIdMap.get(toModelId || '') || '';
+        
+        if (fromObjectId && toObjectId) {
+          // Try to get operation name from ActionType
+          let operationName = messageName;
+          const actionType = messageElement.getElementsByTagName('ActionType')[0];
+          if (actionType) {
+            const actionTypeCall = actionType.getElementsByTagName('ActionTypeCall')[0];
+            if (actionTypeCall) {
+              const operationId = actionTypeCall.getAttribute('Operation');
+              if (operationId) {
+                // Find the operation in the XML
+                const operations = xmlDoc.getElementsByTagName('Operation');
+                for (let k = 0; k < operations.length; k++) {
+                  if (operations[k].getAttribute('Id') === operationId) {
+                    operationName = operations[k].getAttribute('Name') || messageName;
+                    break;
+                  }
+                }
+              }
+            }
+          }
+          
+          messages.push({
+            id: messageId,
+            from: fromObjectId,
+            to: toObjectId,
+            name: operationName,
+            type: messageType === 'Create Message' ? 'create' : 
+                  messageType === 'Message' ? 'synchCall' : 'message'
+          });
+          
+          console.log(`Added message: ${operationName} from ${fromObjectId} to ${toObjectId}`);
+        }
+      }
     }
     
-    // Extract references (REF objects)
-    const refElements = xmlDoc.getElementsByTagName('ref');
+    // Extract references (empty for now, can be enhanced later)
     const references: Reference[] = [];
     
-    for (let i = 0; i < refElements.length; i++) {
-      const ref = refElements[i];
-      const id = ref.getAttribute('id') || generateId();
-      const name = ref.getAttribute('name') || `Reference${i}`;
-      const diagramName = ref.getAttribute('refdiagram') || undefined;
-      
-      references.push({
-        id,
-        name,
-        diagramName
-      });
+    console.log('Processed sequence diagram:', { diagramId, diagramName, objects: objects.length, messages: messages.length });
+    
+    if (objects.length === 0) {
+      toast.warning('No objects found in the sequence diagram');
+    } else if (messages.length === 0) {
+      toast.warning('No messages found in the sequence diagram');
+    } else {
+      toast.success(`Successfully processed sequence diagram with ${objects.length} objects and ${messages.length} messages`);
     }
     
-    console.log('Processed sequence diagram:', { diagramId, diagramName, objects, messages, references });
     return {
       id: diagramId,
       name: diagramName,
@@ -275,6 +405,14 @@ export const processClassDiagramFile = async (file: File): Promise<ClassInfo[] |
     
     console.log('Parsing Visual Paradigm class diagram XML...');
     
+    // Check for Visual Paradigm structure
+    const projectElement = xmlDoc.getElementsByTagName('Project')[0];
+    if (!projectElement || projectElement.getAttribute('Xml_structure') !== 'simple') {
+      console.error('Not a valid Visual Paradigm XML file');
+      toast.error('Invalid Visual Paradigm XML format');
+      return null;
+    }
+    
     // Extract classes from Visual Paradigm format
     const modelsElement = xmlDoc.getElementsByTagName('Models')[0];
     if (!modelsElement) {
@@ -283,7 +421,7 @@ export const processClassDiagramFile = async (file: File): Promise<ClassInfo[] |
       return null;
     }
     
-    // Get all Class elements under Models
+    // Get all Class elements under Models (including nested in packages)
     const classElements = modelsElement.getElementsByTagName('Class');
     const classes: ClassInfo[] = [];
     
@@ -294,52 +432,91 @@ export const processClassDiagramFile = async (file: File): Promise<ClassInfo[] |
       const id = classElement.getAttribute('Id') || generateId();
       const name = classElement.getAttribute('Name') || `Class${i}`;
       
-      // Extract package name - Visual Paradigm may store this differently
-      let packageName = classElement.getAttribute('PackageName') || 
-                       classElement.getAttribute('Package') || 
-                       'default';
+      // Extract package name - look for parent Package element
+      let packageName = 'default';
+      let parentElement = classElement.parentElement;
+      while (parentElement && parentElement.tagName !== 'Models') {
+        if (parentElement.tagName === 'Package') {
+          packageName = parentElement.getAttribute('Name') || 'default';
+          break;
+        }
+        parentElement = parentElement.parentElement;
+      }
       
-      console.log(`Processing class: ${name} (${id})`);
+      console.log(`Processing class: ${name} (${id}) in package: ${packageName}`);
       
       // Extract operations (methods) from Visual Paradigm format
-      const operationElements = classElement.getElementsByTagName('Operation');
+      const modelChildren = classElement.getElementsByTagName('ModelChildren')[0];
       const methods: MethodInfo[] = [];
       
-      console.log(`Found ${operationElements.length} operations for class ${name}`);
-      
-      for (let j = 0; j < operationElements.length; j++) {
-        const operationElement = operationElements[j];
-        const methodId = operationElement.getAttribute('Id') || generateId();
-        const methodName = operationElement.getAttribute('Name') || `method${j}`;
-        const returnType = operationElement.getAttribute('ReturnType') || 
-                          operationElement.getAttribute('Type') || 'void';
-        const visibility = operationElement.getAttribute('Visibility') || 'public';
+      if (modelChildren) {
+        const operationElements = modelChildren.getElementsByTagName('Operation');
         
-        console.log(`Processing operation: ${methodName} (${methodId})`);
+        console.log(`Found ${operationElements.length} operations for class ${name}`);
         
-        // Extract parameters from Visual Paradigm format
-        const paramElements = operationElement.getElementsByTagName('Parameter');
-        const parameters: ParameterInfo[] = [];
-        
-        for (let k = 0; k < paramElements.length; k++) {
-          const paramElement = paramElements[k];
-          const paramName = paramElement.getAttribute('Name') || `param${k}`;
-          const paramType = paramElement.getAttribute('Type') || 
-                           paramElement.getAttribute('ParameterType') || 'Object';
+        for (let j = 0; j < operationElements.length; j++) {
+          const operationElement = operationElements[j];
+          const methodId = operationElement.getAttribute('Id') || generateId();
+          const methodName = operationElement.getAttribute('Name') || `method${j}`;
+          const visibility = (operationElement.getAttribute('Visibility') || 'public').toLowerCase();
           
-          parameters.push({
-            name: paramName,
-            type: paramType
+          console.log(`Processing operation: ${methodName} (${methodId})`);
+          
+          // Extract return type
+          let returnType = 'void';
+          const returnTypeElement = operationElement.getElementsByTagName('ReturnType')[0];
+          if (returnTypeElement) {
+            const dataType = returnTypeElement.getElementsByTagName('DataType')[0];
+            const classType = returnTypeElement.getElementsByTagName('Class')[0];
+            if (dataType) {
+              returnType = dataType.getAttribute('Name') || 'void';
+            } else if (classType) {
+              returnType = classType.getAttribute('Name') || 'Object';
+            }
+          }
+          
+          // Extract parameters from Visual Paradigm format
+          const parameters: ParameterInfo[] = [];
+          const operationModelChildren = operationElement.getElementsByTagName('ModelChildren')[0];
+          
+          if (operationModelChildren) {
+            const paramElements = operationModelChildren.getElementsByTagName('Parameter');
+            
+            for (let k = 0; k < paramElements.length; k++) {
+              const paramElement = paramElements[k];
+              const paramName = paramElement.getAttribute('Name') || `param${k}`;
+              
+              // Extract parameter type
+              let paramType = 'Object';
+              const paramTypeElement = paramElement.getElementsByTagName('Type')[0];
+              if (paramTypeElement) {
+                const dataType = paramTypeElement.getElementsByTagName('DataType')[0];
+                const classType = paramTypeElement.getElementsByTagName('Class')[0];
+                if (dataType) {
+                  paramType = dataType.getAttribute('Name') || 'Object';
+                } else if (classType) {
+                  paramType = classType.getAttribute('Name') || 'Object';
+                } else {
+                  // Fallback: try direct Type attribute
+                  paramType = paramElement.getAttribute('Type') || 'Object';
+                }
+              }
+              
+              parameters.push({
+                name: paramName,
+                type: paramType
+              });
+            }
+          }
+          
+          methods.push({
+            id: methodId,
+            name: methodName,
+            returnType,
+            visibility,
+            parameters
           });
         }
-        
-        methods.push({
-          id: methodId,
-          name: methodName,
-          returnType,
-          visibility: visibility.toLowerCase(),
-          parameters
-        });
       }
       
       classes.push({
