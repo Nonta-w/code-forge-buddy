@@ -423,7 +423,7 @@ export const processClassDiagramFile = async (file: File): Promise<ClassInfo[] |
     
     // Get all Class elements under Models (including nested in packages)
     const classElements = modelsElement.getElementsByTagName('Class');
-    const classes: ClassInfo[] = [];
+    const classesMap = new Map<string, ClassInfo>(); // Use Map to track unique classes
     
     console.log(`Found ${classElements.length} class elements`);
     
@@ -519,21 +519,33 @@ export const processClassDiagramFile = async (file: File): Promise<ClassInfo[] |
         }
       }
       
-      classes.push({
-        id,
-        name,
-        packageName,
-        methods,
-        relatedFunctions: [] // Will be populated when RTM is processed
-      });
+      // Create a unique key based on class name and method signatures
+      const methodSignatures = methods.map(m => 
+        `${m.name}(${m.parameters.map(p => p.type).join(',')}):${m.returnType}`
+      ).sort().join('|');
+      const uniqueKey = `${name}:${packageName}:${methodSignatures}`;
+      
+      // Only add if we haven't seen this exact class before
+      if (!classesMap.has(uniqueKey)) {
+        classesMap.set(uniqueKey, {
+          id,
+          name,
+          packageName,
+          methods,
+          relatedFunctions: [] // Will be populated when RTM is processed
+        });
+      } else {
+        console.log(`Skipping duplicate class: ${name} in package: ${packageName}`);
+      }
     }
     
-    console.log('Processed class diagram:', classes);
+    const classes = Array.from(classesMap.values());
+    console.log('Processed class diagram after deduplication:', classes);
     
     if (classes.length === 0) {
       toast.warning('No classes found in the Visual Paradigm XML file');
     } else {
-      toast.success(`Successfully processed ${classes.length} classes`);
+      toast.success(`Successfully processed ${classes.length} unique classes`);
     }
     
     return classes;
@@ -654,31 +666,46 @@ export const generateStubCode = (cls: ClassInfo): string => {
  */
 public class ${cls.name}Stub {\n`;
   
-  // Add stub methods
-  cls.methods.forEach(method => {
-    // Generate method signature
-    const paramsList = method.parameters.map(p => `${p.type} ${p.name}`).join(', ');
-    code += `    ${method.visibility} ${method.returnType} ${method.name}(${paramsList}) {\n`;
-    
-    // Generate return statement based on return type
-    if (method.returnType === 'void') {
-      code += '        // Stub implementation\n';
-    } else if (['int', 'byte', 'short', 'long'].includes(method.returnType)) {
-      code += '        return 0;\n';
-    } else if (['float', 'double'].includes(method.returnType)) {
-      code += '        return 0.0;\n';
-    } else if (method.returnType === 'boolean') {
-      code += '        return false;\n';
-    } else if (method.returnType === 'char') {
-      code += "        return '0';\n";
-    } else if (method.returnType === 'String') {
-      code += '        return "stub";\n';
-    } else {
-      code += '        return null;\n';
-    }
-    
+  // Add stub methods - ensure we have methods to generate
+  if (cls.methods && cls.methods.length > 0) {
+    cls.methods.forEach(method => {
+      // Generate method signature
+      const paramsList = method.parameters.map(p => `${p.type} ${p.name}`).join(', ');
+      code += `    ${method.visibility} ${method.returnType} ${method.name}(${paramsList}) {\n`;
+      
+      // Generate return statement based on return type with more realistic values
+      if (method.returnType === 'void') {
+        code += '        // Stub implementation\n        System.out.println("Stub method called: ' + method.name + '");\n';
+      } else if (['int', 'Integer'].includes(method.returnType)) {
+        code += '        return 42;\n';
+      } else if (['byte', 'Byte'].includes(method.returnType)) {
+        code += '        return (byte) 1;\n';
+      } else if (['short', 'Short'].includes(method.returnType)) {
+        code += '        return (short) 100;\n';
+      } else if (['long', 'Long'].includes(method.returnType)) {
+        code += '        return 1000L;\n';
+      } else if (['float', 'Float'].includes(method.returnType)) {
+        code += '        return 3.14f;\n';
+      } else if (['double', 'Double'].includes(method.returnType)) {
+        code += '        return 2.718;\n';
+      } else if (['boolean', 'Boolean'].includes(method.returnType)) {
+        code += '        return true;\n';
+      } else if (['char', 'Character'].includes(method.returnType)) {
+        code += "        return 'X';\n";
+      } else if (method.returnType === 'String') {
+        code += `        return "stub_${method.name.toLowerCase()}_result";\n`;
+      } else {
+        code += '        return null; // TODO: Return appropriate stub object\n';
+      }
+      
+      code += '    }\n\n';
+    });
+  } else {
+    // Add a default constructor if no methods are found
+    code += `    public ${cls.name}Stub() {\n`;
+    code += '        // Default stub constructor\n';
     code += '    }\n\n';
-  });
+  }
   
   code += '}\n';
   return code;
@@ -697,78 +724,109 @@ public class ${cls.name}Driver {\n
     private ${cls.name} testObject = new ${cls.name}();
 \n`;
   
-  // Add test methods
-  cls.methods.forEach(method => {
-    const methodName = method.name.charAt(0).toUpperCase() + method.name.slice(1);
-    code += `    @Test\n    public void test${methodName}() {\n`;
-    
-    // Generate parameter values
-    const paramValues: string[] = [];
-    const paramDeclarations: string[] = [];
-    
-    method.parameters.forEach((param, idx) => {
-      let declaration: string;
-      let value: string;
+  // Add test methods - ensure we have methods to test
+  if (cls.methods && cls.methods.length > 0) {
+    cls.methods.forEach(method => {
+      const methodName = method.name.charAt(0).toUpperCase() + method.name.slice(1);
+      code += `    @Test\n    public void test${methodName}() {\n`;
       
-      switch (param.type) {
-        case 'int':
-        case 'byte':
-        case 'short':
-        case 'long':
-          value = `${idx + 1}`;
-          declaration = `${param.type} ${param.name} = ${value};`;
-          break;
-        case 'float':
-        case 'double':
-          value = `${idx + 1}.0`;
-          declaration = `${param.type} ${param.name} = ${value}${param.type === 'float' ? 'f' : ''};`;
-          break;
-        case 'boolean':
-          value = 'true';
-          declaration = `boolean ${param.name} = ${value};`;
-          break;
-        case 'char':
-          value = `'A'`;
-          declaration = `char ${param.name} = ${value};`;
-          break;
-        case 'String':
-          value = `"testValue${idx}"`;
-          declaration = `String ${param.name} = ${value};`;
-          break;
-        default:
-          value = 'null';
-          declaration = `${param.type} ${param.name} = null; // TODO: Initialize with appropriate test data`;
-      }
+      // Generate parameter values
+      const paramValues: string[] = [];
+      const paramDeclarations: string[] = [];
       
-      paramValues.push(param.name);
-      paramDeclarations.push(declaration);
-    });
-    
-    // Add parameter declarations to code
-    paramDeclarations.forEach(decl => {
-      code += `        ${decl}\n`;
-    });
-    
-    // Call the method
-    if (method.returnType !== 'void') {
-      code += `
+      method.parameters.forEach((param, idx) => {
+        let declaration: string;
+        let value: string;
+        
+        switch (param.type) {
+          case 'int':
+          case 'Integer':
+            value = `${(idx + 1) * 10}`;
+            declaration = `${param.type} ${param.name} = ${value};`;
+            break;
+          case 'byte':
+          case 'Byte':
+            value = `(byte) ${idx + 1}`;
+            declaration = `${param.type} ${param.name} = ${value};`;
+            break;
+          case 'short':
+          case 'Short':
+            value = `(short) ${(idx + 1) * 100}`;
+            declaration = `${param.type} ${param.name} = ${value};`;
+            break;
+          case 'long':
+          case 'Long':
+            value = `${(idx + 1) * 1000}L`;
+            declaration = `${param.type} ${param.name} = ${value};`;
+            break;
+          case 'float':
+          case 'Float':
+            value = `${(idx + 1) * 1.5}f`;
+            declaration = `${param.type} ${param.name} = ${value};`;
+            break;
+          case 'double':
+          case 'Double':
+            value = `${(idx + 1) * 2.5}`;
+            declaration = `${param.type} ${param.name} = ${value};`;
+            break;
+          case 'boolean':
+          case 'Boolean':
+            value = idx % 2 === 0 ? 'true' : 'false';
+            declaration = `${param.type} ${param.name} = ${value};`;
+            break;
+          case 'char':
+          case 'Character':
+            value = `'${String.fromCharCode(65 + idx)}'`; // A, B, C, etc.
+            declaration = `${param.type} ${param.name} = ${value};`;
+            break;
+          case 'String':
+            value = `"testValue${idx + 1}"`;
+            declaration = `String ${param.name} = ${value};`;
+            break;
+          default:
+            value = 'null';
+            declaration = `${param.type} ${param.name} = null; // TODO: Initialize with appropriate test data`;
+        }
+        
+        paramValues.push(param.name);
+        paramDeclarations.push(declaration);
+      });
+      
+      // Add parameter declarations to code
+      paramDeclarations.forEach(decl => {
+        code += `        ${decl}\n`;
+      });
+      
+      // Call the method
+      if (method.returnType !== 'void') {
+        code += `
         // Call the method and store the result
         ${method.returnType} result = testObject.${method.name}(${paramValues.join(', ')});
         
         // TODO: Add assertions for the result
         // assertEquals(expectedValue, result);
+        System.out.println("Method ${method.name} returned: " + result);
 `;
-    } else {
-      code += `
+      } else {
+        code += `
         // Call the method
         testObject.${method.name}(${paramValues.join(', ')});
         
         // TODO: Add assertions if needed
+        System.out.println("Method ${method.name} executed successfully");
 `;
-    }
-    
+      }
+      
+      code += '    }\n\n';
+    });
+  } else {
+    // Add a default test if no methods are found
+    code += `    @Test\n    public void testDefaultConstructor() {\n`;
+    code += `        // Test that the object can be created\n`;
+    code += `        assertNotNull(testObject);\n`;
+    code += `        System.out.println("${cls.name} object created successfully");\n`;
     code += '    }\n\n';
-  });
+  }
   
   code += '}\n';
   return code;

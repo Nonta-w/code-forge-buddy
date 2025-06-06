@@ -50,7 +50,7 @@ const Index = () => {
         );
       case 4:
         return (
-          <div className="px-4 py-6">
+          <div className="px-4 py-6 h-full">
             <CodeViewer />
           </div>
         );
@@ -62,8 +62,8 @@ const Index = () => {
   return (
     <div className="min-h-screen bg-gray-50 flex flex-col">
       <AppHeader />
-      <div className="flex-1 container mx-auto py-4">
-        <div className="bg-white shadow-sm rounded-lg overflow-hidden">
+      <div className="flex-1 container mx-auto py-4 flex flex-col min-h-0">
+        <div className={`bg-white shadow-sm rounded-lg overflow-hidden ${currentStep === 4 ? 'flex-1 flex flex-col min-h-0' : ''}`}>
           {renderStep()}
         </div>
       </div>
