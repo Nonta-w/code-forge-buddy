@@ -1,4 +1,3 @@
-
 import { 
   UploadedFile, 
   FileType, 
@@ -49,34 +48,70 @@ export const processRTMFile = async (file: File): Promise<SystemFunction[]> => {
     const content = await readFileAsText(file);
     const lines = content.split('\n');
     
+    if (lines.length < 2) {
+      toast.error('RTM file is empty or has no data rows');
+      return [];
+    }
+    
     // Skip header line and process each row
     const systemFunctions: SystemFunction[] = [];
-    const header = lines[0].split(',');
+    const header = lines[0].split(',').map(col => col.trim().toLowerCase());
     
-    // Find column indices
-    const fnIdIndex = header.findIndex(col => col.trim().toLowerCase().includes('requirement id'));
-    const fnNameIndex = header.findIndex(col => col.trim().toLowerCase().includes('system function'));
-    const seqDiagramIndex = header.findIndex(col => col.trim().toLowerCase().includes('sequence diagram'));
-    const relatedSeqDiagramIndex = header.findIndex(col => col.trim().toLowerCase().includes('related sequence diagram'));
+    console.log('RTM file header:', header); // Debug the headers
     
-    if (fnIdIndex === -1 || fnNameIndex === -1 || seqDiagramIndex === -1) {
-      console.error('Required columns not found in RTM file');
-      toast.error('Invalid RTM format. Required columns not found.');
+    // Find column indices with flexible matching
+    const possibleFnIdColumns = ['requirement id', 'req id', 'req_id', 'requirementid', 'id', 'requirement'];
+    const possibleFnNameColumns = ['system function', 'function', 'function name', 'systemfunction', 'name', 'description'];
+    const possibleSeqDiagramColumns = ['sequence diagram', 'seq diagram', 'sequencediagram', 'diagram', 'sequence'];
+    const possibleRelatedSeqDiagramColumns = ['related sequence diagram', 'related diagram', 'relateddiagram', 'additional diagrams'];
+    
+    // Find best match for each required column
+    const fnIdIndex = findBestColumnMatch(header, possibleFnIdColumns);
+    const fnNameIndex = findBestColumnMatch(header, possibleFnNameColumns);
+    const seqDiagramIndex = findBestColumnMatch(header, possibleSeqDiagramColumns);
+    const relatedSeqDiagramIndex = findBestColumnMatch(header, possibleRelatedSeqDiagramColumns);
+    
+    console.log('Column indices:', { fnIdIndex, fnNameIndex, seqDiagramIndex, relatedSeqDiagramIndex });
+    
+    // Check if we found the minimum required columns
+    if (fnIdIndex === -1 || fnNameIndex === -1) {
+      toast.error('Required columns not found in RTM file. Please ensure your CSV has columns for Requirement ID and System Function.');
       return [];
+    }
+    
+    // Even if sequence diagram column is missing, we can still process the file
+    const hasSeqDiagram = seqDiagramIndex !== -1;
+    if (!hasSeqDiagram) {
+      toast.warning('Sequence diagram column not found. Some features may be limited.');
     }
     
     for (let i = 1; i < lines.length; i++) {
       if (!lines[i].trim()) continue;
       
-      const columns = lines[i].split(',');
+      const columns = lines[i].split(',').map(col => col.trim());
+      
+      if (columns.length < Math.max(fnIdIndex, fnNameIndex) + 1) {
+        console.warn(`Line ${i} has fewer columns than expected`);
+        continue;
+      }
       
       const functionId = columns[fnIdIndex].trim();
       const functionName = columns[fnNameIndex].trim();
-      const sequenceDiagram = columns[seqDiagramIndex].trim();
+      
+      if (!functionId || !functionName) {
+        console.warn(`Line ${i} has empty required values`);
+        continue;
+      }
+      
+      // Get sequence diagram if column exists
+      let sequenceDiagram = '';
+      if (hasSeqDiagram && columns.length > seqDiagramIndex) {
+        sequenceDiagram = columns[seqDiagramIndex].trim();
+      }
       
       // Get related sequence diagrams if column exists
       let relatedDiagrams: string[] = [];
-      if (relatedSeqDiagramIndex !== -1 && columns[relatedSeqDiagramIndex]) {
+      if (relatedSeqDiagramIndex !== -1 && columns.length > relatedSeqDiagramIndex && columns[relatedSeqDiagramIndex]) {
         relatedDiagrams = columns[relatedSeqDiagramIndex].split(';').map(d => d.trim()).filter(d => d);
       }
       
@@ -100,6 +135,13 @@ export const processRTMFile = async (file: File): Promise<SystemFunction[]> => {
     }
     
     console.log('Processed system functions:', systemFunctions);
+    
+    if (systemFunctions.length === 0) {
+      toast.warning('No valid system functions found in the RTM file');
+    } else {
+      toast.success(`Successfully processed ${systemFunctions.length} system functions`);
+    }
+    
     return systemFunctions;
   } catch (error) {
     console.error('Error processing RTM file:', error);
@@ -107,6 +149,26 @@ export const processRTMFile = async (file: File): Promise<SystemFunction[]> => {
     return [];
   }
 };
+
+// Helper function to find the best matching column
+function findBestColumnMatch(headers: string[], possibleNames: string[]): number {
+  // Try exact match first
+  for (const name of possibleNames) {
+    const index = headers.indexOf(name);
+    if (index !== -1) return index;
+  }
+  
+  // Try partial match
+  for (const name of possibleNames) {
+    for (let i = 0; i < headers.length; i++) {
+      if (headers[i].includes(name) || name.includes(headers[i])) {
+        return i;
+      }
+    }
+  }
+  
+  return -1;
+}
 
 // Process uploaded Sequence Diagram file
 export const processSequenceDiagramFile = async (file: File): Promise<SequenceDiagram | null> => {

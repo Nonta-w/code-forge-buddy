@@ -7,7 +7,13 @@ import { useApp } from '@/context/AppContext';
 import { Button } from '@/components/ui/button';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { validateFileExtension } from '@/utils/fileUtils';
-import { Upload, FileText, ActivitySquare, ArrowRight } from 'lucide-react';
+import { Upload, FileText, ActivitySquare, ArrowRight, HelpCircle } from 'lucide-react';
+import {
+  Tooltip,
+  TooltipContent,
+  TooltipProvider,
+  TooltipTrigger,
+} from "@/components/ui/tooltip";
 
 export default function FileUpload() {
   const { addFile, isLoading, setCurrentStep, uploadedFiles } = useApp();
@@ -99,9 +105,30 @@ export default function FileUpload() {
                 ? 'Drop the RTM CSV file here'
                 : 'Drag & drop RTM CSV file here'}
             </p>
-            <p className="text-sm text-gray-500 mb-4">
-              CSV file with Requirement ID, System Function, Sequence Diagram columns
-            </p>
+            <div className="text-sm text-gray-500 mb-4">
+              <p>CSV file should contain these columns:</p>
+              <div className="flex items-center gap-2 mt-2 justify-center">
+                <p className="bg-gray-100 px-2 py-1 rounded">Requirement ID</p>
+                <p className="bg-gray-100 px-2 py-1 rounded">System Function</p>
+                <p className="bg-gray-100 px-2 py-1 rounded">Sequence Diagram</p>
+                <TooltipProvider>
+                  <Tooltip>
+                    <TooltipTrigger className="text-blue-500">
+                      <HelpCircle size={16} />
+                    </TooltipTrigger>
+                    <TooltipContent side="bottom" className="max-w-sm">
+                      <p>The CSV file should have a header row with these column names (or similar):</p>
+                      <ul className="list-disc pl-5 mt-1">
+                        <li>Requirement ID (or "Req ID", "ID", etc.)</li>
+                        <li>System Function (or "Function Name", "Description", etc.)</li>
+                        <li>Sequence Diagram (or "Diagram", "Sequence", etc.)</li>
+                        <li>Optional: Related Sequence Diagram</li>
+                      </ul>
+                    </TooltipContent>
+                  </Tooltip>
+                </TooltipProvider>
+              </div>
+            </div>
             <Button disabled={isLoading}>
               {isLoading ? 'Uploading...' : 'Select File'}
             </Button>
