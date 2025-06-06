@@ -114,7 +114,7 @@ export default function CodeViewer() {
       </CardHeader>
       <CardContent className="p-0">
         <div className="space-y-2 p-4">
-          {codeSessions.map((session) => (
+          {codeSessions.slice().reverse().map((session) => (
             <Collapsible
               key={session.id}
               open={openSessions.has(session.id)}
