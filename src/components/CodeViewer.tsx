@@ -91,11 +91,15 @@ export default function CodeViewer() {
           onValueChange={setActiveCodeId}
           className="w-full h-full flex flex-col"
         >
-          <div className="flex justify-between items-center p-4 border-b">
-            <ScrollArea className="flex-1 max-w-[calc(100%-120px)]">
-              <TabsList className="w-max flex-nowrap">
+          <div className="flex justify-between items-start p-4 border-b gap-4">
+            <div className="flex-1 min-w-0">
+              <TabsList className="w-full h-auto flex-wrap gap-1 justify-start bg-transparent p-0">
                 {generatedCodes.map((code) => (
-                  <TabsTrigger key={code.id} value={code.id} className="whitespace-nowrap">
+                  <TabsTrigger 
+                    key={code.id} 
+                    value={code.id} 
+                    className="whitespace-nowrap flex-shrink-0 data-[state=active]:bg-primary data-[state=active]:text-primary-foreground"
+                  >
                     {code.fileName}
                     <span className="ml-2 bg-gray-200 px-1.5 py-0.5 rounded text-xs">
                       {code.type}
@@ -103,13 +107,13 @@ export default function CodeViewer() {
                   </TabsTrigger>
                 ))}
               </TabsList>
-            </ScrollArea>
+            </div>
             {activeCode && (
               <Button
                 size="sm"
                 variant="outline"
                 onClick={downloadCode}
-                className="flex items-center gap-1 ml-4"
+                className="flex items-center gap-1 flex-shrink-0"
               >
                 <Download size={16} />
                 <span>Download</span>
