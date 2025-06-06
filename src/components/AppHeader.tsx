@@ -1,77 +1,120 @@
 
 import { useApp } from '@/context/AppContext';
 import { Button } from '@/components/ui/button';
+import { Card, CardContent } from '@/components/ui/card';
+import { Badge } from '@/components/ui/badge';
+import { 
+  FileText, 
+  CheckCircle, 
+  Circle, 
+  Settings,
+  RotateCcw
+} from 'lucide-react';
 import {
-  Tooltip,
-  TooltipContent,
-  TooltipTrigger
-} from '@/components/ui/tooltip';
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+  AlertDialogTrigger,
+} from '@/components/ui/alert-dialog';
 
 export default function AppHeader() {
-  const { currentStep, setCurrentStep, uploadedFiles } = useApp();
+  const { currentStep, resetAll } = useApp();
 
-  // Determine if we can navigate to each step based on prerequisites
-  const canGoToFunctionSelection = uploadedFiles.some(file => file.type === 'rtm');
-  
   const steps = [
-    { id: 1, name: 'Upload Files', enabled: true },
-    { id: 2, name: 'Select Function', enabled: canGoToFunctionSelection },
-    { id: 3, name: 'Select Classes', enabled: false }, // Will enable when a function is selected
-    { id: 4, name: 'Generated Code', enabled: false } // Will enable when code is generated
+    { number: 1, title: 'Upload Files', icon: FileText },
+    { number: 2, title: 'Select Function', icon: Settings },
+    { number: 3, title: 'Select Classes', icon: CheckCircle },
+    { number: 4, title: 'Generated Code', icon: FileText }
   ];
 
-  const handleStepChange = (stepId: number) => {
-    // Only allow navigation to enabled steps
-    const step = steps.find(s => s.id === stepId);
-    if (step && step.enabled) {
-      setCurrentStep(stepId);
-    }
-  };
-
   return (
-    <header className="bg-white border-b px-6 py-4">
-      <div className="container mx-auto">
+    <header className="bg-white shadow-sm border-b">
+      <div className="container mx-auto px-4 py-4">
         <div className="flex items-center justify-between">
-          <div>
-            <h1 className="text-2xl font-bold text-gray-800">
-              Stub & Driver Generator
-            </h1>
-            <p className="text-sm text-gray-500">
-              Generate stubs and drivers for system testing
-            </p>
+          <div className="flex items-center space-x-4">
+            <div className="flex items-center space-x-2">
+              <FileText className="h-8 w-8 text-blue-600" />
+              <h1 className="text-2xl font-bold text-gray-900">
+                Stub & Driver Generator
+              </h1>
+            </div>
           </div>
-          <div className="flex items-center">
-            <nav className="flex items-center space-x-1">
-              {steps.map((step) => (
-                <Tooltip key={step.id}>
-                  <TooltipTrigger asChild>
-                    <Button
-                      variant={currentStep === step.id ? 'default' : 'outline'}
-                      size="sm"
-                      onClick={() => handleStepChange(step.id)}
-                      className={`relative ${!step.enabled ? 'opacity-50 cursor-not-allowed' : ''}`}
-                      disabled={!step.enabled}
-                    >
-                      <span className="mr-1">{step.id}</span>
-                      <span className="hidden sm:inline">{step.name}</span>
-                      {currentStep === step.id && (
-                        <span className="absolute -bottom-[5px] left-1/2 transform -translate-x-1/2 w-2 h-2 bg-primary rounded-full" />
-                      )}
-                    </Button>
-                  </TooltipTrigger>
-                  <TooltipContent>
-                    <p>{step.name}</p>
-                    {!step.enabled && step.id > 1 && (
-                      <p className="text-xs text-red-500">
-                        {step.id === 2 && "Upload RTM file first"}
-                        {step.id === 3 && "Select a function first"}
-                        {step.id === 4 && "Generate code first"}
-                      </p>
-                    )}
-                  </TooltipContent>
-                </Tooltip>
-              ))}
-            </nav>
+
+          <div className="flex items-center space-x-4">
+            {/* Progress Steps */}
+            <Card className="bg-gray-50">
+              <CardContent className="py-3 px-4">
+                <div className="flex items-center space-x-4">
+                  {steps.map((step, index) => {
+                    const Icon = step.icon;
+                    const isActive = currentStep === step.number;
+                    const isCompleted = currentStep > step.number;
+
+                    return (
+                      <div key={step.number} className="flex items-center">
+                        <div className="flex items-center space-x-2">
+                          <div className={`flex items-center justify-center w-8 h-8 rounded-full border-2 ${
+                            isCompleted 
+                              ? 'bg-green-500 border-green-500 text-white' 
+                              : isActive 
+                                ? 'bg-blue-500 border-blue-500 text-white' 
+                                : 'bg-white border-gray-300 text-gray-400'
+                          }`}>
+                            {isCompleted ? (
+                              <CheckCircle className="w-4 h-4" />
+                            ) : (
+                              <span className="text-sm font-medium">{step.number}</span>
+                            )}
+                          </div>
+                          <div className="hidden sm:block">
+                            <Badge 
+                              variant={isActive ? "default" : isCompleted ? "secondary" : "outline"}
+                              className="text-xs"
+                            >
+                              {step.title}
+                            </Badge>
+                          </div>
+                        </div>
+                        {index < steps.length - 1 && (
+                          <div className={`hidden sm:block w-8 h-0.5 mx-2 ${
+                            isCompleted ? 'bg-green-500' : 'bg-gray-300'
+                          }`} />
+                        )}
+                      </div>
+                    );
+                  })}
+                </div>
+              </CardContent>
+            </Card>
+
+            {/* Reset Button */}
+            <AlertDialog>
+              <AlertDialogTrigger asChild>
+                <Button variant="outline" size="sm" className="flex items-center gap-2">
+                  <RotateCcw size={16} />
+                  Reset
+                </Button>
+              </AlertDialogTrigger>
+              <AlertDialogContent>
+                <AlertDialogHeader>
+                  <AlertDialogTitle>Reset All Data</AlertDialogTitle>
+                  <AlertDialogDescription>
+                    This will clear all uploaded files, generated code, and reset the application to its initial state. This action cannot be undone.
+                  </AlertDialogDescription>
+                </AlertDialogHeader>
+                <AlertDialogFooter>
+                  <AlertDialogCancel>Cancel</AlertDialogCancel>
+                  <AlertDialogAction onClick={resetAll}>
+                    Reset Everything
+                  </AlertDialogAction>
+                </AlertDialogFooter>
+              </AlertDialogContent>
+            </AlertDialog>
           </div>
         </div>
       </div>

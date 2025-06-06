@@ -33,6 +33,7 @@ interface AppContextType {
   uploadedFiles: UploadedFile[];
   addFile: (file: File, type: FileType) => Promise<void>;
   removeFile: (id: string) => void;
+  resetAll: () => void; // Add reset function
   
   // RTM and Functions
   systemFunctions: SystemFunction[];
@@ -300,6 +301,21 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     }
   };
   
+  // Reset all state
+  const resetAll = () => {
+    setUploadedFiles([]);
+    setSystemFunctions([]);
+    setSelectedFunctionId(null);
+    setAllClasses([]);
+    setFilteredClasses([]);
+    setSelectedClassIds([]);
+    setSequenceDiagrams([]);
+    setGeneratedCodes([]);
+    setCurrentStep(1);
+    setIsLoading(false);
+    setIsGenerating(false);
+  };
+  
   // Update filtered classes when selected function changes
   useEffect(() => {
     if (selectedFunctionId) {
@@ -379,6 +395,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     uploadedFiles,
     addFile,
     removeFile,
+    resetAll, // Add reset function
     systemFunctions,
     selectedFunctionId,
     setSelectedFunctionId,

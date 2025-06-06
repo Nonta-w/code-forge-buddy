@@ -1,4 +1,3 @@
-
 import { 
   UploadedFile, 
   FileType, 
@@ -519,13 +518,10 @@ export const processClassDiagramFile = async (file: File): Promise<ClassInfo[] |
         }
       }
       
-      // Create a unique key based on class name and method signatures
-      const methodSignatures = methods.map(m => 
-        `${m.name}(${m.parameters.map(p => p.type).join(',')}):${m.returnType}`
-      ).sort().join('|');
-      const uniqueKey = `${name}:${packageName}:${methodSignatures}`;
+      // Create a unique key based on class name and package - simplified approach
+      const uniqueKey = `${name}:${packageName}`;
       
-      // Only add if we haven't seen this exact class before
+      // Only add if we haven't seen this class name in this package before
       if (!classesMap.has(uniqueKey)) {
         classesMap.set(uniqueKey, {
           id,
@@ -654,6 +650,118 @@ export const mapFunctionsToClasses = (
   });
   
   return updatedClasses;
+};
+
+// Generate code
+export const generateCode = () => {
+  try {
+    setIsGenerating(true);
+    
+    const selectedClasses = allClasses.filter(cls => selectedClassIds.includes(cls.id));
+    const newGeneratedCodes: GeneratedCode[] = [];
+    const generatedFileNames = new Set<string>(); // Track generated file names to prevent duplicates
+    
+    // Create a map of class names to class objects for quick lookup
+    const classMap = new Map<string, ClassInfo>();
+    allClasses.forEach(cls => {
+      classMap.set(cls.name, cls);
+    });
+    
+    // Find which classes need stubs and drivers
+    const selectedClassNames = new Set(selectedClasses.map(cls => cls.name));
+    const callGraph = new Map<string, Set<string>>();
+    
+    // Build call graph from sequence diagrams
+    sequenceDiagrams.forEach(diagram => {
+      diagram.messages.forEach(message => {
+        const fromObj = diagram.objects.find(obj => obj.id === message.from);
+        const toObj = diagram.objects.find(obj => obj.id === message.to);
+        
+        if (fromObj && toObj && fromObj.type && toObj.type) {
+          if (!callGraph.has(fromObj.type)) {
+            callGraph.set(fromObj.type, new Set<string>());
+          }
+          callGraph.get(fromObj.type)?.add(toObj.type);
+        }
+      });
+    });
+    
+    // Generate stubs for classes that are called by selected classes but not in selection
+    selectedClasses.forEach(selectedClass => {
+      const calledClasses = callGraph.get(selectedClass.name) || new Set<string>();
+      
+      calledClasses.forEach(calledClassName => {
+        if (!selectedClassNames.has(calledClassName)) {
+          const calledClass = classMap.get(calledClassName);
+          if (calledClass) {
+            const stubFileName = `${calledClassName}Stub.java`;
+            if (!generatedFileNames.has(stubFileName)) {
+              const stubCode = generateStubCode(calledClass);
+              newGeneratedCodes.push({
+                id: generateId(),
+                fileName: stubFileName,
+                fileContent: stubCode,
+                type: 'stub',
+                timestamp: new Date(),
+                relatedClass: calledClassName
+              });
+              generatedFileNames.add(stubFileName);
+            }
+          }
+        }
+      });
+    });
+    
+    // Generate drivers for classes that call selected classes but not in selection
+    selectedClasses.forEach(selectedClass => {
+      callGraph.forEach((calledClasses, callerClassName) => {
+        if (calledClasses.has(selectedClass.name) && !selectedClassNames.has(callerClassName)) {
+          // Generate driver for selected class
+          const driverFileName = `${selectedClass.name}Driver.java`;
+          if (!generatedFileNames.has(driverFileName)) {
+            const driverCode = generateDriverCode(selectedClass);
+            newGeneratedCodes.push({
+              id: generateId(),
+              fileName: driverFileName,
+              fileContent: driverCode,
+              type: 'driver',
+              timestamp: new Date(),
+              relatedClass: selectedClass.name
+            });
+            generatedFileNames.add(driverFileName);
+          }
+        }
+      });
+    });
+    
+    // If no stubs or drivers were generated, create at least a driver for each selected class
+    if (newGeneratedCodes.length === 0) {
+      selectedClasses.forEach(selectedClass => {
+        const driverFileName = `${selectedClass.name}Driver.java`;
+        if (!generatedFileNames.has(driverFileName)) {
+          const driverCode = generateDriverCode(selectedClass);
+          newGeneratedCodes.push({
+            id: generateId(),
+            fileName: driverFileName,
+            fileContent: driverCode,
+            type: 'driver',
+            timestamp: new Date(),
+            relatedClass: selectedClass.name
+          });
+          generatedFileNames.add(driverFileName);
+        }
+      });
+    }
+    
+    setGeneratedCodes(prev => [...prev, ...newGeneratedCodes]);
+    setCurrentStep(4); // Move to code view
+    toast.success(`Generated ${newGeneratedCodes.length} code files`);
+  } catch (error) {
+    console.error('Error generating code:', error);
+    toast.error('Failed to generate code');
+  } finally {
+    setIsGenerating(false);
+  }
 };
 
 // Generate stub code for a class
