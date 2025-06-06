@@ -1,4 +1,3 @@
-
 import React, { createContext, useContext, useState, useEffect } from 'react';
 import { toast } from 'sonner';
 import {
@@ -325,7 +324,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     }
   }, [selectedFunctionId, allClasses]);
   
-  // Update class relationships when RTM, classes, and sequence diagrams are all loaded
+  // Update class relationships when all required data is available
   useEffect(() => {
     console.log('=== Checking for mapping update ===');
     console.log('System functions:', systemFunctions.length);
@@ -347,7 +346,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
       console.log('Classes with relationships:', updatedClasses.filter(c => c.relatedFunctions.length > 0).map(c => ({ name: c.name, functions: c.relatedFunctions })));
       setAllClasses(updatedClasses);
     }
-  }, [systemFunctions, sequenceDiagrams]);
+  }, [systemFunctions, sequenceDiagrams, allClasses.length]); // Changed: added allClasses.length as dependency
   
   // Save to localStorage whenever state changes
   useEffect(() => {
