@@ -1,3 +1,4 @@
+
 import { 
   UploadedFile, 
   FileType, 
@@ -272,35 +273,59 @@ export const processClassDiagramFile = async (file: File): Promise<ClassInfo[] |
       return null;
     }
     
-    // Extract classes
-    const classElements = xmlDoc.getElementsByTagName('class');
+    console.log('Parsing Visual Paradigm class diagram XML...');
+    
+    // Extract classes from Visual Paradigm format
+    const modelsElement = xmlDoc.getElementsByTagName('Models')[0];
+    if (!modelsElement) {
+      console.error('No Models element found in XML');
+      toast.error('Invalid Visual Paradigm XML format - no Models element');
+      return null;
+    }
+    
+    // Get all Class elements under Models
+    const classElements = modelsElement.getElementsByTagName('Class');
     const classes: ClassInfo[] = [];
+    
+    console.log(`Found ${classElements.length} class elements`);
     
     for (let i = 0; i < classElements.length; i++) {
       const classElement = classElements[i];
-      const id = classElement.getAttribute('id') || generateId();
-      const name = classElement.getAttribute('name') || `Class${i}`;
-      const packageName = classElement.getAttribute('package') || 'default';
+      const id = classElement.getAttribute('Id') || generateId();
+      const name = classElement.getAttribute('Name') || `Class${i}`;
       
-      // Extract methods
-      const methodElements = classElement.getElementsByTagName('method');
+      // Extract package name - Visual Paradigm may store this differently
+      let packageName = classElement.getAttribute('PackageName') || 
+                       classElement.getAttribute('Package') || 
+                       'default';
+      
+      console.log(`Processing class: ${name} (${id})`);
+      
+      // Extract operations (methods) from Visual Paradigm format
+      const operationElements = classElement.getElementsByTagName('Operation');
       const methods: MethodInfo[] = [];
       
-      for (let j = 0; j < methodElements.length; j++) {
-        const methodElement = methodElements[j];
-        const methodId = methodElement.getAttribute('id') || generateId();
-        const methodName = methodElement.getAttribute('name') || `method${j}`;
-        const returnType = methodElement.getAttribute('returnType') || 'void';
-        const visibility = methodElement.getAttribute('visibility') || 'public';
+      console.log(`Found ${operationElements.length} operations for class ${name}`);
+      
+      for (let j = 0; j < operationElements.length; j++) {
+        const operationElement = operationElements[j];
+        const methodId = operationElement.getAttribute('Id') || generateId();
+        const methodName = operationElement.getAttribute('Name') || `method${j}`;
+        const returnType = operationElement.getAttribute('ReturnType') || 
+                          operationElement.getAttribute('Type') || 'void';
+        const visibility = operationElement.getAttribute('Visibility') || 'public';
         
-        // Extract parameters
-        const paramElements = methodElement.getElementsByTagName('parameter');
+        console.log(`Processing operation: ${methodName} (${methodId})`);
+        
+        // Extract parameters from Visual Paradigm format
+        const paramElements = operationElement.getElementsByTagName('Parameter');
         const parameters: ParameterInfo[] = [];
         
         for (let k = 0; k < paramElements.length; k++) {
           const paramElement = paramElements[k];
-          const paramName = paramElement.getAttribute('name') || `param${k}`;
-          const paramType = paramElement.getAttribute('type') || 'Object';
+          const paramName = paramElement.getAttribute('Name') || `param${k}`;
+          const paramType = paramElement.getAttribute('Type') || 
+                           paramElement.getAttribute('ParameterType') || 'Object';
           
           parameters.push({
             name: paramName,
@@ -312,7 +337,7 @@ export const processClassDiagramFile = async (file: File): Promise<ClassInfo[] |
           id: methodId,
           name: methodName,
           returnType,
-          visibility,
+          visibility: visibility.toLowerCase(),
           parameters
         });
       }
@@ -327,6 +352,13 @@ export const processClassDiagramFile = async (file: File): Promise<ClassInfo[] |
     }
     
     console.log('Processed class diagram:', classes);
+    
+    if (classes.length === 0) {
+      toast.warning('No classes found in the Visual Paradigm XML file');
+    } else {
+      toast.success(`Successfully processed ${classes.length} classes`);
+    }
+    
     return classes;
   } catch (error) {
     console.error('Error processing class diagram file:', error);
