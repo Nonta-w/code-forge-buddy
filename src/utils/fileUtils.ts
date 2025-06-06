@@ -388,7 +388,7 @@ export const processSequenceDiagramFile = async (file: File): Promise<SequenceDi
   }
 };
 
-// Process uploaded Class Diagram file with improved deduplication
+// Process uploaded Class Diagram file
 export const processClassDiagramFile = async (file: File): Promise<ClassInfo[] | null> => {
   try {
     const content = await readFileAsText(file);
@@ -518,14 +518,10 @@ export const processClassDiagramFile = async (file: File): Promise<ClassInfo[] |
         }
       }
       
-      // Create a unique signature for deduplication
-      const methodSignatures = methods.map(m => 
-        `${m.name}(${m.parameters.map(p => `${p.type} ${p.name}`).join(', ')}):${m.returnType}`
-      ).sort().join('|');
+      // Create a unique key based on class name and package - simplified approach
+      const uniqueKey = `${name}:${packageName}`;
       
-      const uniqueKey = `${name}:${packageName}:${methodSignatures}`;
-      
-      // Only add if we haven't seen this exact class (same name, package, and methods) before
+      // Only add if we haven't seen this class name in this package before
       if (!classesMap.has(uniqueKey)) {
         classesMap.set(uniqueKey, {
           id,
@@ -534,9 +530,8 @@ export const processClassDiagramFile = async (file: File): Promise<ClassInfo[] |
           methods,
           relatedFunctions: [] // Will be populated when RTM is processed
         });
-        console.log(`Added unique class: ${name} in package: ${packageName} with ${methods.length} methods`);
       } else {
-        console.log(`Skipping duplicate class: ${name} in package: ${packageName} with identical methods`);
+        console.log(`Skipping duplicate class: ${name} in package: ${packageName}`);
       }
     }
     
