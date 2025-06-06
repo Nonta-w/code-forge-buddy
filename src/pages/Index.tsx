@@ -6,9 +6,14 @@ import FileManager from '@/components/FileManager';
 import FunctionSelection from '@/components/FunctionSelection';
 import ClassSelection from '@/components/ClassSelection';
 import CodeViewer from '@/components/CodeViewer';
+import { Alert, AlertDescription } from '@/components/ui/alert';
+import { AlertCircle } from 'lucide-react';
 
 const Index = () => {
-  const { currentStep } = useApp();
+  const { currentStep, uploadedFiles } = useApp();
+  
+  // Determine if requirements for each step are met
+  const hasRtmFile = uploadedFiles.some(file => file.type === 'rtm');
 
   const renderStep = () => {
     switch (currentStep) {
@@ -22,9 +27,19 @@ const Index = () => {
           </>
         );
       case 2:
-        return (
+        // Show function selection if RTM file is uploaded, otherwise show error
+        return hasRtmFile ? (
           <div className="px-4 py-6">
             <FunctionSelection />
+          </div>
+        ) : (
+          <div className="px-4 py-6">
+            <Alert variant="destructive">
+              <AlertCircle className="h-4 w-4" />
+              <AlertDescription>
+                Please upload an RTM file first. Return to Step 1 to upload files.
+              </AlertDescription>
+            </Alert>
           </div>
         );
       case 3:

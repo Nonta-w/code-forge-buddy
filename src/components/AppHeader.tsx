@@ -8,14 +8,25 @@ import {
 } from '@/components/ui/tooltip';
 
 export default function AppHeader() {
-  const { currentStep, setCurrentStep } = useApp();
+  const { currentStep, setCurrentStep, uploadedFiles } = useApp();
 
+  // Determine if we can navigate to each step based on prerequisites
+  const canGoToFunctionSelection = uploadedFiles.some(file => file.type === 'rtm');
+  
   const steps = [
-    { id: 1, name: 'Upload Files' },
-    { id: 2, name: 'Select Function' },
-    { id: 3, name: 'Select Classes' },
-    { id: 4, name: 'Generated Code' }
+    { id: 1, name: 'Upload Files', enabled: true },
+    { id: 2, name: 'Select Function', enabled: canGoToFunctionSelection },
+    { id: 3, name: 'Select Classes', enabled: false }, // Will enable when a function is selected
+    { id: 4, name: 'Generated Code', enabled: false } // Will enable when code is generated
   ];
+
+  const handleStepChange = (stepId: number) => {
+    // Only allow navigation to enabled steps
+    const step = steps.find(s => s.id === stepId);
+    if (step && step.enabled) {
+      setCurrentStep(stepId);
+    }
+  };
 
   return (
     <header className="bg-white border-b px-6 py-4">
@@ -37,8 +48,9 @@ export default function AppHeader() {
                     <Button
                       variant={currentStep === step.id ? 'default' : 'outline'}
                       size="sm"
-                      onClick={() => setCurrentStep(step.id)}
-                      className="relative"
+                      onClick={() => handleStepChange(step.id)}
+                      className={`relative ${!step.enabled ? 'opacity-50 cursor-not-allowed' : ''}`}
+                      disabled={!step.enabled}
                     >
                       <span className="mr-1">{step.id}</span>
                       <span className="hidden sm:inline">{step.name}</span>
@@ -49,6 +61,13 @@ export default function AppHeader() {
                   </TooltipTrigger>
                   <TooltipContent>
                     <p>{step.name}</p>
+                    {!step.enabled && step.id > 1 && (
+                      <p className="text-xs text-red-500">
+                        {step.id === 2 && "Upload RTM file first"}
+                        {step.id === 3 && "Select a function first"}
+                        {step.id === 4 && "Generate code first"}
+                      </p>
+                    )}
                   </TooltipContent>
                 </Tooltip>
               ))}

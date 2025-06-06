@@ -1,3 +1,4 @@
+
 import React, { createContext, useContext, useState, useEffect } from 'react';
 import { toast } from 'sonner';
 import {
@@ -24,7 +25,8 @@ const STORAGE_KEYS = {
   SYSTEM_FUNCTIONS: 'stub_driver_system_functions',
   SEQUENCE_DIAGRAMS: 'stub_driver_sequence_diagrams',
   ALL_CLASSES: 'stub_driver_all_classes',
-  GENERATED_CODES: 'stub_driver_generated_codes'
+  GENERATED_CODES: 'stub_driver_generated_codes',
+  CURRENT_STEP: 'stub_driver_current_step'
 };
 
 interface AppContextType {
@@ -96,8 +98,11 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     return saved ? JSON.parse(saved) : [];
   });
   
-  // UI state
-  const [currentStep, setCurrentStep] = useState<number>(1);
+  // UI state - Load the current step from localStorage or default to 1
+  const [currentStep, setCurrentStep] = useState<number>(() => {
+    const saved = localStorage.getItem(STORAGE_KEYS.CURRENT_STEP);
+    return saved ? parseInt(saved, 10) : 1;
+  });
   
   // Status flags
   const [isLoading, setIsLoading] = useState<boolean>(false);
@@ -294,6 +299,9 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
       setFilteredClasses(filtered);
       // Clear selected class ids
       setSelectedClassIds([]);
+      
+      // Automatically move to step 3 when a function is selected
+      setCurrentStep(3);
     } else {
       setFilteredClasses([]);
     }
@@ -335,6 +343,11 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
   useEffect(() => {
     localStorage.setItem(STORAGE_KEYS.GENERATED_CODES, JSON.stringify(generatedCodes));
   }, [generatedCodes]);
+  
+  // Save current step to localStorage
+  useEffect(() => {
+    localStorage.setItem(STORAGE_KEYS.CURRENT_STEP, currentStep.toString());
+  }, [currentStep]);
   
   const value = {
     uploadedFiles,

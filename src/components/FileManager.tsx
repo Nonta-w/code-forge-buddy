@@ -1,3 +1,4 @@
+
 import { useApp } from '@/context/AppContext';
 import { Button } from '@/components/ui/button';
 import {
@@ -8,11 +9,14 @@ import {
   TableHeader,
   TableRow
 } from '@/components/ui/table';
-import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
-import { FileIcon, Trash2 } from 'lucide-react';
+import { Card, CardContent, CardHeader, CardTitle, CardFooter } from '@/components/ui/card';
+import { FileIcon, Trash2, ArrowRight } from 'lucide-react';
 
 export default function FileManager() {
-  const { uploadedFiles, removeFile } = useApp();
+  const { uploadedFiles, removeFile, setCurrentStep } = useApp();
+
+  // Check if an RTM file has been uploaded to enable the next step
+  const hasRtmFile = uploadedFiles.some(file => file.type === 'rtm');
 
   const getFileTypeLabel = (type: string) => {
     switch (type) {
@@ -35,6 +39,12 @@ export default function FileManager() {
 
   const formatTimestamp = (date: Date) => {
     return new Date(date).toLocaleString();
+  };
+  
+  const handleNextStep = () => {
+    if (hasRtmFile) {
+      setCurrentStep(2); // Go to function selection
+    }
   };
 
   return (
@@ -83,6 +93,22 @@ export default function FileManager() {
           </div>
         )}
       </CardContent>
+      <CardFooter className="flex justify-end">
+        {hasRtmFile && (
+          <Button 
+            onClick={handleNextStep}
+            className="flex items-center gap-2"
+          >
+            Continue to Function Selection
+            <ArrowRight size={16} />
+          </Button>
+        )}
+        {!hasRtmFile && uploadedFiles.length > 0 && (
+          <div className="text-amber-600 text-sm">
+            Please upload an RTM file to continue
+          </div>
+        )}
+      </CardFooter>
     </Card>
   );
 }

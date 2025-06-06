@@ -7,11 +7,14 @@ import { useApp } from '@/context/AppContext';
 import { Button } from '@/components/ui/button';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { validateFileExtension } from '@/utils/fileUtils';
-import { Upload, FileText, ActivitySquare } from 'lucide-react';
+import { Upload, FileText, ActivitySquare, ArrowRight } from 'lucide-react';
 
 export default function FileUpload() {
-  const { addFile, isLoading } = useApp();
+  const { addFile, isLoading, setCurrentStep, uploadedFiles } = useApp();
   const [activeTab, setActiveTab] = useState<FileType>('rtm');
+  
+  // Check if RTM file has been uploaded
+  const hasRtmFile = uploadedFiles.some(file => file.type === 'rtm');
   
   const onDrop = useCallback(
     async (acceptedFiles: File[]) => {
@@ -52,6 +55,12 @@ export default function FileUpload() {
     },
     multiple: false
   });
+  
+  const handleNextStep = () => {
+    if (hasRtmFile) {
+      setCurrentStep(2); // Go to function selection
+    }
+  };
   
   return (
     <div className="w-full px-4 py-6">
@@ -141,6 +150,18 @@ export default function FileUpload() {
           </div>
         </TabsContent>
       </Tabs>
+      
+      {hasRtmFile && (
+        <div className="mt-6 flex justify-center">
+          <Button 
+            onClick={handleNextStep} 
+            className="flex items-center gap-2"
+          >
+            Continue to Function Selection
+            <ArrowRight size={16} />
+          </Button>
+        </div>
+      )}
     </div>
   );
 }
