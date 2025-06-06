@@ -18,6 +18,15 @@ import {
   generateId
 } from '@/utils/fileUtils';
 
+// Add new interface for code generation sessions
+interface CodeGenerationSession {
+  id: string;
+  name: string;
+  selectedClasses: string[];
+  codes: GeneratedCode[];
+  timestamp: Date;
+}
+
 // Add local storage keys
 const STORAGE_KEYS = {
   UPLOADED_FILES: 'stub_driver_uploaded_files',
@@ -25,6 +34,7 @@ const STORAGE_KEYS = {
   SEQUENCE_DIAGRAMS: 'stub_driver_sequence_diagrams',
   ALL_CLASSES: 'stub_driver_all_classes',
   GENERATED_CODES: 'stub_driver_generated_codes',
+  CODE_SESSIONS: 'stub_driver_code_sessions',
   CURRENT_STEP: 'stub_driver_current_step'
 };
 
@@ -51,6 +61,7 @@ interface AppContextType {
   
   // Code Generation
   generatedCodes: GeneratedCode[];
+  codeSessions: CodeGenerationSession[];
   generateCode: () => void;
   
   // UI State
@@ -97,6 +108,12 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
   // Generated Code state
   const [generatedCodes, setGeneratedCodes] = useState<GeneratedCode[]>(() => {
     const saved = localStorage.getItem(STORAGE_KEYS.GENERATED_CODES);
+    return saved ? JSON.parse(saved) : [];
+  });
+
+  // Code Sessions state
+  const [codeSessions, setCodeSessions] = useState<CodeGenerationSession[]>(() => {
+    const saved = localStorage.getItem(STORAGE_KEYS.CODE_SESSIONS);
     return saved ? JSON.parse(saved) : [];
   });
   
@@ -289,10 +306,21 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
           });
         });
       }
+
+      // Create new session
+      const sessionName = selectedClasses.map(cls => cls.name).join(', ');
+      const newSession: CodeGenerationSession = {
+        id: generateId(),
+        name: sessionName,
+        selectedClasses: selectedClasses.map(cls => cls.name),
+        codes: newGeneratedCodes,
+        timestamp: new Date()
+      };
       
       setGeneratedCodes(prev => [...prev, ...newGeneratedCodes]);
+      setCodeSessions(prev => [...prev, newSession]);
       setCurrentStep(4); // Move to code view
-      toast.success(`Generated ${newGeneratedCodes.length} code files`);
+      toast.success(`Generated ${newGeneratedCodes.length} code files for: ${sessionName}`);
     } catch (error) {
       console.error('Error generating code:', error);
       toast.error('Failed to generate code');
@@ -311,6 +339,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     setSelectedClassIds([]);
     setSequenceDiagrams([]);
     setGeneratedCodes([]);
+    setCodeSessions([]);
     setCurrentStep(1);
     setIsLoading(false);
     setIsGenerating(false);
@@ -385,6 +414,10 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
   useEffect(() => {
     localStorage.setItem(STORAGE_KEYS.GENERATED_CODES, JSON.stringify(generatedCodes));
   }, [generatedCodes]);
+
+  useEffect(() => {
+    localStorage.setItem(STORAGE_KEYS.CODE_SESSIONS, JSON.stringify(codeSessions));
+  }, [codeSessions]);
   
   // Save current step to localStorage
   useEffect(() => {
@@ -405,6 +438,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     toggleClassSelection,
     sequenceDiagrams,
     generatedCodes,
+    codeSessions,
     generateCode,
     currentStep,
     setCurrentStep,
