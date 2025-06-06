@@ -1,4 +1,3 @@
-
 import { useApp } from '@/context/AppContext';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent } from '@/components/ui/card';
@@ -23,7 +22,7 @@ import {
 } from '@/components/ui/alert-dialog';
 
 export default function AppHeader() {
-  const { currentStep, resetAll } = useApp();
+  const { currentStep, setCurrentStep, resetAll } = useApp();
 
   const steps = [
     { number: 1, title: 'Upload Files', icon: FileText },
@@ -31,6 +30,18 @@ export default function AppHeader() {
     { number: 3, title: 'Select Classes', icon: CheckCircle },
     { number: 4, title: 'Generated Code', icon: FileText }
   ];
+
+  const handleStepClick = (stepNumber) => {
+    // Only allow clicking on current step or previous steps
+    if (stepNumber <= currentStep) {
+      setCurrentStep(stepNumber);
+    }
+  };
+
+  const handleReset = () => {
+    resetAll();
+    setCurrentStep(1); // Reset to step 1
+  };
 
   return (
     <header className="bg-white shadow-sm border-b">
@@ -54,16 +65,24 @@ export default function AppHeader() {
                     const Icon = step.icon;
                     const isActive = currentStep === step.number;
                     const isCompleted = currentStep > step.number;
+                    const isClickable = step.number <= currentStep;
 
                     return (
                       <div key={step.number} className="flex items-center">
-                        <div className="flex items-center space-x-2">
-                          <div className={`flex items-center justify-center w-8 h-8 rounded-full border-2 ${
+                        <div 
+                          className={`flex items-center space-x-2 ${
+                            isClickable ? 'cursor-pointer hover:opacity-80' : 'cursor-not-allowed'
+                          }`}
+                          onClick={() => handleStepClick(step.number)}
+                        >
+                          <div className={`flex items-center justify-center w-8 h-8 rounded-full border-2 transition-colors ${
                             isCompleted 
                               ? 'bg-green-500 border-green-500 text-white' 
                               : isActive 
                                 ? 'bg-blue-500 border-blue-500 text-white' 
-                                : 'bg-white border-gray-300 text-gray-400'
+                                : isClickable
+                                  ? 'bg-white border-gray-300 text-gray-600 hover:border-gray-400'
+                                  : 'bg-gray-100 border-gray-200 text-gray-400'
                           }`}>
                             {isCompleted ? (
                               <CheckCircle className="w-4 h-4" />
@@ -73,15 +92,17 @@ export default function AppHeader() {
                           </div>
                           <div className="hidden sm:block">
                             <Badge 
-                              variant={isActive ? "default" : isCompleted ? "secondary" : "outline"}
-                              className="text-xs"
+                              variant={isActive ? "default" : isCompleted ? "secondary" : isClickable ? "outline" : "secondary"}
+                              className={`text-xs transition-colors ${
+                                isClickable ? 'hover:bg-opacity-80' : 'opacity-60'
+                              }`}
                             >
                               {step.title}
                             </Badge>
                           </div>
                         </div>
                         {index < steps.length - 1 && (
-                          <div className={`hidden sm:block w-8 h-0.5 mx-2 ${
+                          <div className={`hidden sm:block w-8 h-0.5 mx-2 transition-colors ${
                             isCompleted ? 'bg-green-500' : 'bg-gray-300'
                           }`} />
                         )}
@@ -104,12 +125,12 @@ export default function AppHeader() {
                 <AlertDialogHeader>
                   <AlertDialogTitle>Reset All Data</AlertDialogTitle>
                   <AlertDialogDescription>
-                    This will clear all uploaded files, generated code, and reset the application to its initial state. This action cannot be undone.
+                    This will clear all uploaded files, generated code, and reset the application to step 1. This action cannot be undone.
                   </AlertDialogDescription>
                 </AlertDialogHeader>
                 <AlertDialogFooter>
                   <AlertDialogCancel>Cancel</AlertDialogCancel>
-                  <AlertDialogAction onClick={resetAll}>
+                  <AlertDialogAction onClick={handleReset}>
                     Reset Everything
                   </AlertDialogAction>
                 </AlertDialogFooter>
