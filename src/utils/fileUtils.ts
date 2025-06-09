@@ -46,15 +46,24 @@ export const readFileAsText = (file: File): Promise<string> => {
 const cleanAndSplitDiagramNames = (diagramString: string): string[] => {
   if (!diagramString) return [];
   
+  console.log('Processing diagram string:', diagramString);
+  
   // Split by comma and clean each diagram name
-  return diagramString
+  const diagrams = diagramString
     .split(',')
-    .map(name => name.trim())
     .map(name => {
-      // Remove leading and trailing quotes
-      return name.replace(/^["']|["']$/g, '');
+      // Remove leading and trailing whitespace
+      let cleaned = name.trim();
+      // Remove leading and trailing quotes (both single and double)
+      cleaned = cleaned.replace(/^["']|["']$/g, '');
+      // Remove any remaining whitespace
+      cleaned = cleaned.trim();
+      return cleaned;
     })
     .filter(name => name.length > 0);
+  
+  console.log('Cleaned diagrams:', diagrams);
+  return diagrams;
 };
 
 // Process uploaded RTM file
@@ -75,9 +84,9 @@ export const processRTMFile = async (file: File): Promise<SystemFunction[]> => {
     console.log('RTM file header:', header); // Debug the headers
     
     // Find column indices with flexible matching
-    const possibleFnIdColumns = ['requirement id', 'req id', 'req_id', 'requirementid', 'id', 'requirement'];
-    const possibleFnNameColumns = ['system function', 'function', 'function name', 'systemfunction', 'name', 'description'];
-    const possibleSeqDiagramColumns = ['sequence diagram', 'seq diagram', 'sequencediagram', 'diagram', 'sequence'];
+    const possibleFnIdColumns = ['functional requirement', 'requirement id', 'req id', 'req_id', 'requirementid', 'id', 'requirement'];
+    const possibleFnNameColumns = ['functional requirement', 'system function', 'function', 'function name', 'systemfunction', 'name', 'description'];
+    const possibleSeqDiagramColumns = ['sequencediagram', 'sequence diagram', 'seq diagram', 'sequencediagram', 'diagram', 'sequence'];
     const possibleRelatedSeqDiagramColumns = ['related sequence diagram', 'related diagram', 'relateddiagram', 'additional diagrams'];
     
     // Find best match for each required column
@@ -124,18 +133,20 @@ export const processRTMFile = async (file: File): Promise<SystemFunction[]> => {
       if (hasSeqDiagram && columns.length > seqDiagramIndex && columns[seqDiagramIndex]) {
         const seqDiagramNames = cleanAndSplitDiagramNames(columns[seqDiagramIndex]);
         allDiagrams.push(...seqDiagramNames);
+        console.log(`Function ${functionId}: Found primary sequence diagrams:`, seqDiagramNames);
       }
       
       // Get related sequence diagrams if column exists
       if (relatedSeqDiagramIndex !== -1 && columns.length > relatedSeqDiagramIndex && columns[relatedSeqDiagramIndex]) {
         const relatedDiagramNames = cleanAndSplitDiagramNames(columns[relatedSeqDiagramIndex]);
         allDiagrams.push(...relatedDiagramNames);
+        console.log(`Function ${functionId}: Found related sequence diagrams:`, relatedDiagramNames);
       }
       
       // Remove duplicates
       allDiagrams = [...new Set(allDiagrams)];
       
-      console.log(`Function ${functionId}: Found sequence diagrams:`, allDiagrams);
+      console.log(`Function ${functionId}: Total sequence diagrams:`, allDiagrams);
       
       // Check if function already exists
       const existingFunction = systemFunctions.find(f => f.id === functionId);

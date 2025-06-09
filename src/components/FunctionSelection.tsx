@@ -9,10 +9,17 @@ import {
 } from '@/components/ui/select';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
-import { CodeIcon } from 'lucide-react';
+import { CodeIcon, AlertTriangle } from 'lucide-react';
+import { Alert, AlertDescription } from '@/components/ui/alert';
 
 export default function FunctionSelection() {
-  const { systemFunctions, selectedFunctionId, setSelectedFunctionId, setCurrentStep } = useApp();
+  const { 
+    systemFunctions, 
+    selectedFunctionId, 
+    setSelectedFunctionId, 
+    setCurrentStep,
+    sequenceDiagrams 
+  } = useApp();
 
   const handleFunctionChange = (value: string) => {
     setSelectedFunctionId(value);
@@ -23,6 +30,22 @@ export default function FunctionSelection() {
       setCurrentStep(3);
     }
   };
+
+  // Check for missing sequence diagrams
+  const getMissingDiagrams = (functionId: string) => {
+    const func = systemFunctions.find(f => f.id === functionId);
+    if (!func) return [];
+    
+    const uploadedDiagramNames = new Set(sequenceDiagrams.map(d => d.name));
+    const missingDiagrams = func.sequenceDiagramNames.filter(
+      diagramName => !uploadedDiagramNames.has(diagramName)
+    );
+    
+    return missingDiagrams;
+  };
+
+  const selectedFunction = systemFunctions.find(f => f.id === selectedFunctionId);
+  const missingDiagrams = selectedFunctionId ? getMissingDiagrams(selectedFunctionId) : [];
 
   return (
     <Card className="w-full">
@@ -55,24 +78,43 @@ export default function FunctionSelection() {
               </Select>
             </div>
 
-            {selectedFunctionId && (
+            {selectedFunction && (
               <>
                 <div className="bg-blue-50 p-4 rounded-md">
                   <h4 className="font-medium mb-2">Related Sequence Diagrams:</h4>
                   <ul className="list-disc pl-5">
-                    {systemFunctions
-                      .find((f) => f.id === selectedFunctionId)
-                      ?.sequenceDiagramNames.map((name, index) => (
-                        <li key={index}>{name}</li>
-                      ))}
+                    {selectedFunction.sequenceDiagramNames.map((name, index) => (
+                      <li key={index} className={missingDiagrams.includes(name) ? 'text-red-600' : 'text-green-600'}>
+                        {name} {missingDiagrams.includes(name) ? '(Missing)' : '(Uploaded)'}
+                      </li>
+                    ))}
                   </ul>
                 </div>
+
+                {missingDiagrams.length > 0 && (
+                  <Alert className="border-orange-200 bg-orange-50">
+                    <AlertTriangle className="h-4 w-4 text-orange-600" />
+                    <AlertDescription className="text-orange-800">
+                      <strong>Missing Sequence Diagrams:</strong> Please upload the following sequence diagrams before proceeding:
+                      <ul className="list-disc pl-5 mt-1">
+                        {missingDiagrams.map((name, index) => (
+                          <li key={index}>{name}</li>
+                        ))}
+                      </ul>
+                      Go back to Step 1 to upload the missing diagrams.
+                    </AlertDescription>
+                  </Alert>
+                )}
                 
                 <Button 
                   onClick={handleProceedToClassSelection}
                   className="w-full"
+                  disabled={missingDiagrams.length > 0}
                 >
-                  Proceed to Class Selection
+                  {missingDiagrams.length > 0 
+                    ? 'Upload Missing Diagrams First' 
+                    : 'Proceed to Class Selection'
+                  }
                 </Button>
               </>
             )}
