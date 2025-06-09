@@ -42,6 +42,21 @@ export const readFileAsText = (file: File): Promise<string> => {
   });
 };
 
+// Helper function to clean and split sequence diagram names
+const cleanAndSplitDiagramNames = (diagramString: string): string[] => {
+  if (!diagramString) return [];
+  
+  // Split by comma and clean each diagram name
+  return diagramString
+    .split(',')
+    .map(name => name.trim())
+    .map(name => {
+      // Remove leading and trailing quotes
+      return name.replace(/^["']|["']$/g, '');
+    })
+    .filter(name => name.length > 0);
+};
+
 // Process uploaded RTM file
 export const processRTMFile = async (file: File): Promise<SystemFunction[]> => {
   try {
@@ -103,20 +118,24 @@ export const processRTMFile = async (file: File): Promise<SystemFunction[]> => {
         continue;
       }
       
-      // Get sequence diagram if column exists
-      let sequenceDiagram = '';
-      if (hasSeqDiagram && columns.length > seqDiagramIndex) {
-        sequenceDiagram = columns[seqDiagramIndex].trim();
+      // Get sequence diagram names and clean them
+      let allDiagrams: string[] = [];
+      
+      if (hasSeqDiagram && columns.length > seqDiagramIndex && columns[seqDiagramIndex]) {
+        const seqDiagramNames = cleanAndSplitDiagramNames(columns[seqDiagramIndex]);
+        allDiagrams.push(...seqDiagramNames);
       }
       
       // Get related sequence diagrams if column exists
-      let relatedDiagrams: string[] = [];
       if (relatedSeqDiagramIndex !== -1 && columns.length > relatedSeqDiagramIndex && columns[relatedSeqDiagramIndex]) {
-        relatedDiagrams = columns[relatedSeqDiagramIndex].split(';').map(d => d.trim()).filter(d => d);
+        const relatedDiagramNames = cleanAndSplitDiagramNames(columns[relatedSeqDiagramIndex]);
+        allDiagrams.push(...relatedDiagramNames);
       }
       
-      // Combine all sequence diagrams
-      const allDiagrams = [sequenceDiagram, ...relatedDiagrams].filter(d => d);
+      // Remove duplicates
+      allDiagrams = [...new Set(allDiagrams)];
+      
+      console.log(`Function ${functionId}: Found sequence diagrams:`, allDiagrams);
       
       // Check if function already exists
       const existingFunction = systemFunctions.find(f => f.id === functionId);
@@ -422,7 +441,7 @@ export const processClassDiagramFile = async (file: File): Promise<ClassInfo[] |
     
     // Get all Class elements under Models (including nested in packages)
     const classElements = modelsElement.getElementsByTagName('Class');
-    const classesMap = new Map<string, ClassInfo>(); // Use Map to track unique classes
+    const classesMap = new Map<string, ClassInfo>(); // Use Map to track unique classes by ID
     
     console.log(`Found ${classElements.length} class elements`);
     
@@ -430,6 +449,12 @@ export const processClassDiagramFile = async (file: File): Promise<ClassInfo[] |
       const classElement = classElements[i];
       const id = classElement.getAttribute('Id') || generateId();
       const name = classElement.getAttribute('Name') || `Class${i}`;
+      
+      // Skip if we already processed this exact class ID
+      if (classesMap.has(id)) {
+        console.log(`Skipping duplicate class ID: ${id} (${name})`);
+        continue;
+      }
       
       // Extract package name - look for parent Package element
       let packageName = 'default';
@@ -518,30 +543,19 @@ export const processClassDiagramFile = async (file: File): Promise<ClassInfo[] |
         }
       }
       
-      // Create a unique signature for deduplication
-      const methodSignatures = methods.map(m => 
-        `${m.name}(${m.parameters.map(p => `${p.type} ${p.name}`).join(', ')}):${m.returnType}`
-      ).sort().join('|');
-      
-      const uniqueKey = `${name}:${packageName}:${methodSignatures}`;
-      
-      // Only add if we haven't seen this exact class (same name, package, and methods) before
-      if (!classesMap.has(uniqueKey)) {
-        classesMap.set(uniqueKey, {
-          id,
-          name,
-          packageName,
-          methods,
-          relatedFunctions: [] // Will be populated when RTM is processed
-        });
-        console.log(`Added unique class: ${name} in package: ${packageName} with ${methods.length} methods`);
-      } else {
-        console.log(`Skipping duplicate class: ${name} in package: ${packageName} with identical methods`);
-      }
+      // Add the class using its unique ID
+      classesMap.set(id, {
+        id,
+        name,
+        packageName,
+        methods,
+        relatedFunctions: [] // Will be populated when RTM is processed
+      });
+      console.log(`Added class: ${name} (ID: ${id}) in package: ${packageName} with ${methods.length} methods`);
     }
     
     const classes = Array.from(classesMap.values());
-    console.log('Processed class diagram after deduplication:', classes);
+    console.log('Processed class diagram after deduplication:', classes.length, 'unique classes');
     
     if (classes.length === 0) {
       toast.warning('No classes found in the Visual Paradigm XML file');
@@ -655,118 +669,6 @@ export const mapFunctionsToClasses = (
   });
   
   return updatedClasses;
-};
-
-// Generate code
-export const generateCode = () => {
-  try {
-    setIsGenerating(true);
-    
-    const selectedClasses = allClasses.filter(cls => selectedClassIds.includes(cls.id));
-    const newGeneratedCodes: GeneratedCode[] = [];
-    const generatedFileNames = new Set<string>(); // Track generated file names to prevent duplicates
-    
-    // Create a map of class names to class objects for quick lookup
-    const classMap = new Map<string, ClassInfo>();
-    allClasses.forEach(cls => {
-      classMap.set(cls.name, cls);
-    });
-    
-    // Find which classes need stubs and drivers
-    const selectedClassNames = new Set(selectedClasses.map(cls => cls.name));
-    const callGraph = new Map<string, Set<string>>();
-    
-    // Build call graph from sequence diagrams
-    sequenceDiagrams.forEach(diagram => {
-      diagram.messages.forEach(message => {
-        const fromObj = diagram.objects.find(obj => obj.id === message.from);
-        const toObj = diagram.objects.find(obj => obj.id === message.to);
-        
-        if (fromObj && toObj && fromObj.type && toObj.type) {
-          if (!callGraph.has(fromObj.type)) {
-            callGraph.set(fromObj.type, new Set<string>());
-          }
-          callGraph.get(fromObj.type)?.add(toObj.type);
-        }
-      });
-    });
-    
-    // Generate stubs for classes that are called by selected classes but not in selection
-    selectedClasses.forEach(selectedClass => {
-      const calledClasses = callGraph.get(selectedClass.name) || new Set<string>();
-      
-      calledClasses.forEach(calledClassName => {
-        if (!selectedClassNames.has(calledClassName)) {
-          const calledClass = classMap.get(calledClassName);
-          if (calledClass) {
-            const stubFileName = `${calledClassName}Stub.java`;
-            if (!generatedFileNames.has(stubFileName)) {
-              const stubCode = generateStubCode(calledClass);
-              newGeneratedCodes.push({
-                id: generateId(),
-                fileName: stubFileName,
-                fileContent: stubCode,
-                type: 'stub',
-                timestamp: new Date(),
-                relatedClass: calledClassName
-              });
-              generatedFileNames.add(stubFileName);
-            }
-          }
-        }
-      });
-    });
-    
-    // Generate drivers for classes that call selected classes but not in selection
-    selectedClasses.forEach(selectedClass => {
-      callGraph.forEach((calledClasses, callerClassName) => {
-        if (calledClasses.has(selectedClass.name) && !selectedClassNames.has(callerClassName)) {
-          // Generate driver for selected class
-          const driverFileName = `${selectedClass.name}Driver.java`;
-          if (!generatedFileNames.has(driverFileName)) {
-            const driverCode = generateDriverCode(selectedClass);
-            newGeneratedCodes.push({
-              id: generateId(),
-              fileName: driverFileName,
-              fileContent: driverCode,
-              type: 'driver',
-              timestamp: new Date(),
-              relatedClass: selectedClass.name
-            });
-            generatedFileNames.add(driverFileName);
-          }
-        }
-      });
-    });
-    
-    // If no stubs or drivers were generated, create at least a driver for each selected class
-    if (newGeneratedCodes.length === 0) {
-      selectedClasses.forEach(selectedClass => {
-        const driverFileName = `${selectedClass.name}Driver.java`;
-        if (!generatedFileNames.has(driverFileName)) {
-          const driverCode = generateDriverCode(selectedClass);
-          newGeneratedCodes.push({
-            id: generateId(),
-            fileName: driverFileName,
-            fileContent: driverCode,
-            type: 'driver',
-            timestamp: new Date(),
-            relatedClass: selectedClass.name
-          });
-          generatedFileNames.add(driverFileName);
-        }
-      });
-    }
-    
-    setGeneratedCodes(prev => [...prev, ...newGeneratedCodes]);
-    setCurrentStep(4); // Move to code view
-    toast.success(`Generated ${newGeneratedCodes.length} code files`);
-  } catch (error) {
-    console.error('Error generating code:', error);
-    toast.error('Failed to generate code');
-  } finally {
-    setIsGenerating(false);
-  }
 };
 
 // Generate stub code for a class
