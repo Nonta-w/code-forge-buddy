@@ -15,7 +15,8 @@ import {
   mapFunctionsToClasses,
   generateStubCode,
   generateDriverCode,
-  generateId
+  generateId,
+  deduplicateClasses
 } from '@/utils/fileUtils';
 
 // Add new interface for code generation sessions
