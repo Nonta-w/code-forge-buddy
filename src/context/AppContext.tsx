@@ -15,8 +15,7 @@ import {
   mapFunctionsToClasses,
   generateStubCode,
   generateDriverCode,
-  generateId,
-  deduplicateClasses
+  generateId
 } from '@/utils/fileUtils';
 
 // Add new interface for code generation sessions
@@ -400,25 +399,13 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     if (selectedFunctionId) {
       console.log('=== Filtering classes for function ===');
       console.log('Selected function ID:', selectedFunctionId);
-      console.log('All classes count:', allClasses.length);
-      console.log('All classes:', allClasses.map(c => ({ 
-        name: c.name, 
-        id: c.id,
-        packageName: c.packageName,
-        relatedFunctions: c.relatedFunctions,
-        methods: c.methods.length 
-      })));
+      console.log('All classes:', allClasses.map(c => ({ name: c.name, relatedFunctions: c.relatedFunctions })));
       
       // Filter classes related to the selected function
       const filtered = allClasses.filter(
-        cls => {
-          const isRelated = cls.relatedFunctions.includes(selectedFunctionId);
-          console.log(`Class ${cls.name}: related functions = [${cls.relatedFunctions.join(', ')}], matches = ${isRelated}`);
-          return isRelated;
-        }
+        cls => cls.relatedFunctions.includes(selectedFunctionId)
       );
       
-      console.log('Filtered classes count:', filtered.length);
       console.log('Filtered classes:', filtered.map(c => c.name));
       setFilteredClasses(filtered);
       // Clear selected class ids
@@ -426,7 +413,6 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
       
       // Don't automatically move to step 3 - let user click button
     } else {
-      console.log('No function selected, clearing filtered classes');
       setFilteredClasses([]);
     }
   }, [selectedFunctionId, allClasses]);
@@ -435,10 +421,8 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
   useEffect(() => {
     console.log('=== Checking for mapping update ===');
     console.log('System functions:', systemFunctions.length);
-    console.log('System functions details:', systemFunctions.map(f => ({ id: f.id, name: f.name, sequenceDiagramNames: f.sequenceDiagramNames })));
-    console.log('All classes before mapping:', allClasses.length);
+    console.log('All classes:', allClasses.length);
     console.log('Sequence diagrams:', sequenceDiagrams.length);
-    console.log('Sequence diagrams details:', sequenceDiagrams.map(d => ({ name: d.name, objects: d.objects.length, messages: d.messages.length, references: d.references.length })));
     
     if (
       systemFunctions.length > 0 &&
@@ -448,12 +432,9 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
       
       // First, get the current class diagram classes
       const classDiagramClasses = allClasses.filter(cls => cls.methods.length > 0 || cls.packageName !== 'default');
-      console.log('Class diagram classes:', classDiagramClasses.length);
       
       // Deduplicate classes using sequence diagrams as the base
       const deduplicatedClasses = deduplicateClasses(sequenceDiagrams, classDiagramClasses);
-      console.log('Deduplicated classes:', deduplicatedClasses.length);
-      console.log('Deduplicated class names:', deduplicatedClasses.map(c => c.name));
       
       // Then map functions to the deduplicated classes
       const updatedClasses = mapFunctionsToClasses(
@@ -463,9 +444,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
       );
       
       console.log('=== Mapping complete, updating classes ===');
-      console.log('Final classes count:', updatedClasses.length);
       console.log('Classes with relationships:', updatedClasses.filter(c => c.relatedFunctions.length > 0).map(c => ({ name: c.name, functions: c.relatedFunctions })));
-      console.log('Classes without relationships:', updatedClasses.filter(c => c.relatedFunctions.length === 0).map(c => c.name));
       setAllClasses(updatedClasses);
     }
   }, [systemFunctions, sequenceDiagrams.length]); // Removed allClasses.length to avoid infinite loop
