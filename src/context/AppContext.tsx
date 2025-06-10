@@ -219,7 +219,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     });
   };
   
-  // Generate code
+  // Enhanced generate code function with REF diagram support
   const generateCode = () => {
     try {
       setIsGenerating(true);
@@ -237,9 +237,13 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
       // Find which classes need stubs and drivers based on interaction with selected classes
       const selectedClassNames = new Set(selectedClasses.map(cls => cls.name));
       const callGraph = new Map<string, Set<string>>(); // caller -> called classes
+      const refDiagramClasses = new Set<string>(); // Classes found in referenced diagrams
       
-      // Build call graph from sequence diagrams
+      // Build call graph from sequence diagrams and process REF boxes
       sequenceDiagrams.forEach(diagram => {
+        console.log(`Processing diagram: ${diagram.name}`);
+        
+        // Process regular messages
         diagram.messages.forEach(message => {
           const fromObj = diagram.objects.find(obj => obj.id === message.from);
           const toObj = diagram.objects.find(obj => obj.id === message.to);
@@ -252,10 +256,43 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
             callGraph.get(fromObj.type)?.add(toObj.type);
           }
         });
+        
+        // Process REF objects to find referenced diagrams
+        diagram.objects.forEach(obj => {
+          if (obj.type === 'REF') {
+            console.log(`Found REF object: ${obj.name}`);
+            // Find the referenced diagram
+            const referencedDiagram = sequenceDiagrams.find(d => d.name === obj.name);
+            if (referencedDiagram) {
+              console.log(`Processing referenced diagram: ${referencedDiagram.name}`);
+              // Add classes from referenced diagram that should have drivers
+              referencedDiagram.objects.forEach(refObj => {
+                if (refObj.type && refObj.type !== 'unknown' && refObj.type !== 'ACTOR' && refObj.type !== 'REF') {
+                  refDiagramClasses.add(refObj.type);
+                  console.log(`Added class from referenced diagram: ${refObj.type}`);
+                }
+              });
+              
+              // Also process messages in referenced diagram
+              referencedDiagram.messages.forEach(message => {
+                const fromObj = referencedDiagram.objects.find(o => o.id === message.from);
+                const toObj = referencedDiagram.objects.find(o => o.id === message.to);
+                
+                if (fromObj && toObj && fromObj.type && toObj.type) {
+                  if (!callGraph.has(fromObj.type)) {
+                    callGraph.set(fromObj.type, new Set<string>());
+                  }
+                  callGraph.get(fromObj.type)?.add(toObj.type);
+                }
+              });
+            }
+          }
+        });
       });
       
       console.log('Call graph:', callGraph);
       console.log('Selected classes for testing:', selectedClassNames);
+      console.log('Classes from referenced diagrams:', refDiagramClasses);
       
       // For each selected class (class under test), generate needed stubs and drivers
       selectedClasses.forEach(classUnderTest => {
@@ -270,7 +307,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
             if (calledClass) {
               const stubFileName = `${calledClassName}Stub.java`;
               if (!generatedFileNames.has(stubFileName)) {
-                const stubCode = generateStubCode(calledClass);
+                const stubCode = generateStubCode(calledClass, sequenceDiagrams);
                 newGeneratedCodes.push({
                   id: generateId(),
                   fileName: stubFileName,
@@ -309,6 +346,29 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
             }
           }
         });
+      });
+      
+      // 3. Generate DRIVERS for classes found in referenced diagrams (REF boxes)
+      refDiagramClasses.forEach(refClassName => {
+        if (!selectedClassNames.has(refClassName)) {
+          const refClass = classMap.get(refClassName);
+          if (refClass) {
+            const driverFileName = `${refClassName}Driver.java`;
+            if (!generatedFileNames.has(driverFileName)) {
+              const driverCode = generateDriverCode(refClass);
+              newGeneratedCodes.push({
+                id: generateId(),
+                fileName: driverFileName,
+                fileContent: driverCode,
+                type: 'driver',
+                timestamp: new Date(),
+                relatedClass: refClassName
+              });
+              generatedFileNames.add(driverFileName);
+              console.log(`Generated driver for ${refClassName} (from referenced diagram)`);
+            }
+          }
+        }
       });
       
       // If no stubs or drivers were generated, create at least a basic driver for each selected class
@@ -479,3 +539,5 @@ export const useApp = (): AppContextType => {
   }
   return context;
 };
+
+}

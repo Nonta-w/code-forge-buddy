@@ -682,8 +682,29 @@ export const mapFunctionsToClasses = (
   return updatedClasses;
 };
 
-// Generate stub code for a class
-export const generateStubCode = (cls: ClassInfo): string => {
+// Helper function to determine if a method should have a return based on sequence diagrams
+const shouldMethodHaveReturn = (methodName: string, className: string, sequenceDiagrams: SequenceDiagram[]): boolean => {
+  for (const diagram of sequenceDiagrams) {
+    // Find the object of this class
+    const classObject = diagram.objects.find(obj => obj.type === className);
+    if (classObject) {
+      // Look for messages from this object that could be returns
+      const outgoingMessages = diagram.messages.filter(msg => 
+        msg.from === classObject.id && 
+        (msg.name === methodName || msg.name.includes(methodName))
+      );
+      
+      // If there are outgoing messages after receiving this method call, it likely returns something
+      if (outgoingMessages.length > 0) {
+        return true;
+      }
+    }
+  }
+  return false;
+};
+
+// Enhanced stub code generation with console output and return type analysis
+export const generateStubCode = (cls: ClassInfo, sequenceDiagrams: SequenceDiagram[] = []): string => {
   const packageLine = cls.packageName ? `package ${cls.packageName};\n\n` : '';
   
   let code = `${packageLine}/**
@@ -699,29 +720,49 @@ public class ${cls.name}Stub {\n`;
       const paramsList = method.parameters.map(p => `${p.type} ${p.name}`).join(', ');
       code += `    ${method.visibility} ${method.returnType} ${method.name}(${paramsList}) {\n`;
       
+      // Always add console output for stub method calls
+      code += `        // Stub method called - logging to console\n`;
+      code += `        System.out.println("STUB CALLED: ${cls.name}.${method.name}(" + `;
+      
+      if (method.parameters.length > 0) {
+        const paramPrintList = method.parameters.map(p => `"${p.name}=" + ${p.name}`).join(' + ", " + ');
+        code += paramPrintList;
+      } else {
+        code += `""`;
+      }
+      code += ` + ")");\n`;
+      
+      // Check if this method should have a return based on sequence diagrams
+      const hasReturnInSequence = shouldMethodHaveReturn(method.name, cls.name, sequenceDiagrams);
+      
       // Generate return statement based on return type with more realistic values
       if (method.returnType === 'void') {
-        code += '        // Stub implementation\n        System.out.println("Stub method called: ' + method.name + '");\n';
-      } else if (['int', 'Integer'].includes(method.returnType)) {
-        code += '        return 42;\n';
-      } else if (['byte', 'Byte'].includes(method.returnType)) {
-        code += '        return (byte) 1;\n';
-      } else if (['short', 'Short'].includes(method.returnType)) {
-        code += '        return (short) 100;\n';
-      } else if (['long', 'Long'].includes(method.returnType)) {
-        code += '        return 1000L;\n';
-      } else if (['float', 'Float'].includes(method.returnType)) {
-        code += '        return 3.14f;\n';
-      } else if (['double', 'Double'].includes(method.returnType)) {
-        code += '        return 2.718;\n';
-      } else if (['boolean', 'Boolean'].includes(method.returnType)) {
-        code += '        return true;\n';
-      } else if (['char', 'Character'].includes(method.returnType)) {
-        code += "        return 'X';\n";
-      } else if (method.returnType === 'String') {
-        code += `        return "stub_${method.name.toLowerCase()}_result";\n`;
+        // No return needed for void methods
+        code += '        // Void method - no return value\n';
       } else {
-        code += '        return null; // TODO: Return appropriate stub object\n';
+        // Always generate return for non-void methods, even if not explicitly shown in sequence diagrams
+        if (['int', 'Integer'].includes(method.returnType)) {
+          code += '        return 42; // Stub return value\n';
+        } else if (['byte', 'Byte'].includes(method.returnType)) {
+          code += '        return (byte) 1; // Stub return value\n';
+        } else if (['short', 'Short'].includes(method.returnType)) {
+          code += '        return (short) 100; // Stub return value\n';
+        } else if (['long', 'Long'].includes(method.returnType)) {
+          code += '        return 1000L; // Stub return value\n';
+        } else if (['float', 'Float'].includes(method.returnType)) {
+          code += '        return 3.14f; // Stub return value\n';
+        } else if (['double', 'Double'].includes(method.returnType)) {
+          code += '        return 2.718; // Stub return value\n';
+        } else if (['boolean', 'Boolean'].includes(method.returnType)) {
+          code += '        return true; // Stub return value\n';
+        } else if (['char', 'Character'].includes(method.returnType)) {
+          code += "        return 'X'; // Stub return value\n";
+        } else if (method.returnType === 'String') {
+          code += `        return "stub_${method.name.toLowerCase()}_result"; // Stub return value\n`;
+        } else {
+          // For object types, return null but include proper return statement
+          code += `        return null; // Stub return value for ${method.returnType}\n`;
+        }
       }
       
       code += '    }\n\n';
@@ -729,7 +770,7 @@ public class ${cls.name}Stub {\n`;
   } else {
     // Add a default constructor if no methods are found
     code += `    public ${cls.name}Stub() {\n`;
-    code += '        // Default stub constructor\n';
+    code += `        System.out.println("STUB CREATED: ${cls.name}Stub constructor called");\n`;
     code += '    }\n\n';
   }
   
@@ -737,7 +778,7 @@ public class ${cls.name}Stub {\n`;
   return code;
 };
 
-// Generate driver code for a class
+// Generate driver code for a class (unchanged)
 export const generateDriverCode = (cls: ClassInfo): string => {
   const packageLine = cls.packageName ? `package ${cls.packageName};\n\n` : '';
   
