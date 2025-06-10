@@ -219,7 +219,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     });
   };
   
-  // Enhanced generate code with REF diagram support
+  // Generate code
   const generateCode = () => {
     try {
       setIsGenerating(true);
@@ -238,48 +238,23 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
       const selectedClassNames = new Set(selectedClasses.map(cls => cls.name));
       const callGraph = new Map<string, Set<string>>(); // caller -> called classes
       
-      // Helper function to process diagram and its references recursively
-      const processDiagramRecursively = (diagram: SequenceDiagram, visited = new Set<string>()) => {
-        if (visited.has(diagram.name)) {
-          return; // Avoid infinite recursion
-        }
-        visited.add(diagram.name);
-        
-        // Process messages in this diagram
+      // Build call graph from sequence diagrams
+      sequenceDiagrams.forEach(diagram => {
         diagram.messages.forEach(message => {
           const fromObj = diagram.objects.find(obj => obj.id === message.from);
           const toObj = diagram.objects.find(obj => obj.id === message.to);
           
           if (fromObj && toObj && fromObj.type && toObj.type) {
-            // Skip ACTOR and REF types for call graph
-            if (fromObj.type !== 'ACTOR' && fromObj.type !== 'REF' && 
-                toObj.type !== 'ACTOR' && toObj.type !== 'REF') {
-              // Record that fromObj.type calls toObj.type
-              if (!callGraph.has(fromObj.type)) {
-                callGraph.set(fromObj.type, new Set<string>());
-              }
-              callGraph.get(fromObj.type)?.add(toObj.type);
+            // Record that fromObj.type calls toObj.type
+            if (!callGraph.has(fromObj.type)) {
+              callGraph.set(fromObj.type, new Set<string>());
             }
+            callGraph.get(fromObj.type)?.add(toObj.type);
           }
         });
-        
-        // Process referenced diagrams
-        diagram.references.forEach(ref => {
-          if (ref.diagramName) {
-            const referencedDiagram = sequenceDiagrams.find(d => d.name === ref.diagramName);
-            if (referencedDiagram) {
-              processDiagramRecursively(referencedDiagram, visited);
-            }
-          }
-        });
-      };
-      
-      // Build call graph from sequence diagrams including references
-      sequenceDiagrams.forEach(diagram => {
-        processDiagramRecursively(diagram);
       });
       
-      console.log('Enhanced call graph with REF support:', callGraph);
+      console.log('Call graph:', callGraph);
       console.log('Selected classes for testing:', selectedClassNames);
       
       // For each selected class (class under test), generate needed stubs and drivers
@@ -417,7 +392,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     }
   }, [selectedFunctionId, allClasses]);
   
-  // Enhanced class relationships mapping with deduplication
+  // Update class relationships when all required data is available
   useEffect(() => {
     console.log('=== Checking for mapping update ===');
     console.log('System functions:', systemFunctions.length);
@@ -426,28 +401,20 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     
     if (
       systemFunctions.length > 0 &&
+      allClasses.length > 0 &&
       sequenceDiagrams.length > 0
     ) {
-      console.log('=== Starting class relationship mapping with deduplication ===');
-      
-      // First, get the current class diagram classes
-      const classDiagramClasses = allClasses.filter(cls => cls.methods.length > 0 || cls.packageName !== 'default');
-      
-      // Deduplicate classes using sequence diagrams as the base
-      const deduplicatedClasses = deduplicateClasses(sequenceDiagrams, classDiagramClasses);
-      
-      // Then map functions to the deduplicated classes
+      console.log('=== Starting class relationship mapping ===');
       const updatedClasses = mapFunctionsToClasses(
         systemFunctions,
         sequenceDiagrams,
-        deduplicatedClasses
+        allClasses
       );
-      
       console.log('=== Mapping complete, updating classes ===');
       console.log('Classes with relationships:', updatedClasses.filter(c => c.relatedFunctions.length > 0).map(c => ({ name: c.name, functions: c.relatedFunctions })));
       setAllClasses(updatedClasses);
     }
-  }, [systemFunctions, sequenceDiagrams.length]); // Removed allClasses.length to avoid infinite loop
+  }, [systemFunctions, sequenceDiagrams, allClasses.length]); // Changed: added allClasses.length as dependency
   
   // Save to localStorage whenever state changes
   useEffect(() => {
