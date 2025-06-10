@@ -316,7 +316,7 @@ export const processSequenceDiagramFile = async (file: File): Promise<SequenceDi
         }
       }
       
-      // Process InteractionOccurrence (REF objects)
+      // Process InteractionOccurrence (REF objects) - Enhanced to extract referenced diagram names
       const occurrences = shapes.getElementsByTagName('InteractionOccurrence');
       for (let i = 0; i < occurrences.length; i++) {
         const occurrence = occurrences[i];
@@ -391,17 +391,45 @@ export const processSequenceDiagramFile = async (file: File): Promise<SequenceDi
       }
     }
     
-    // Extract references (empty for now, can be enhanced later)
+    // Extract references - Enhanced to capture referenced diagram names from REF objects
     const references: Reference[] = [];
     
-    console.log('Processed sequence diagram:', { diagramId, diagramName, objects: objects.length, messages: messages.length });
+    // Look for InteractionOccurrence models in the frame to get referenced diagram names
+    const occurrenceModels = frame.getElementsByTagName('InteractionOccurrence');
+    for (let i = 0; i < occurrenceModels.length; i++) {
+      const occurrenceModel = occurrenceModels[i];
+      const refId = occurrenceModel.getAttribute('Id') || generateId();
+      const refName = occurrenceModel.getAttribute('Name') || `Ref${i}`;
+      
+      // Try to extract the referenced diagram name from the Name attribute or other properties
+      // REF objects often have the diagram name in their Name attribute
+      let referencedDiagramName = refName;
+      
+      // Clean up the reference name - remove common prefixes/suffixes
+      if (referencedDiagramName.toLowerCase().startsWith('ref ')) {
+        referencedDiagramName = referencedDiagramName.substring(4).trim();
+      }
+      if (referencedDiagramName.toLowerCase().startsWith('ref:')) {
+        referencedDiagramName = referencedDiagramName.substring(4).trim();
+      }
+      
+      references.push({
+        id: refId,
+        name: refName,
+        diagramName: referencedDiagramName
+      });
+      
+      console.log(`Added reference: ${refName} -> ${referencedDiagramName}`);
+    }
+    
+    console.log('Processed sequence diagram:', { diagramId, diagramName, objects: objects.length, messages: messages.length, references: references.length });
     
     if (objects.length === 0) {
       toast.warning('No objects found in the sequence diagram');
     } else if (messages.length === 0) {
       toast.warning('No messages found in the sequence diagram');
     } else {
-      toast.success(`Successfully processed sequence diagram with ${objects.length} objects and ${messages.length} messages`);
+      toast.success(`Successfully processed sequence diagram with ${objects.length} objects, ${messages.length} messages, and ${references.length} references`);
     }
     
     return {
@@ -416,6 +444,88 @@ export const processSequenceDiagramFile = async (file: File): Promise<SequenceDi
     toast.error('Failed to process sequence diagram. Please check file format.');
     return null;
   }
+};
+
+// New function to deduplicate classes using sequence diagram classes as base
+export const deduplicateClasses = (
+  sequenceDiagrams: SequenceDiagram[],
+  classDiagramClasses: ClassInfo[]
+): ClassInfo[] => {
+  console.log('=== Starting class deduplication ===');
+  
+  // Step 1: Extract all unique class names from sequence diagrams
+  const sequenceClassNames = new Set<string>();
+  sequenceDiagrams.forEach(diagram => {
+    diagram.objects.forEach(obj => {
+      if (obj.type && obj.type !== 'unknown' && obj.type !== 'ACTOR' && obj.type !== 'REF') {
+        sequenceClassNames.add(obj.type);
+      }
+    });
+  });
+  
+  console.log('Classes found in sequence diagrams:', Array.from(sequenceClassNames));
+  
+  // Step 2: Create a map to deduplicate class diagram classes by name+package
+  const classMap = new Map<string, ClassInfo>();
+  
+  classDiagramClasses.forEach(cls => {
+    const key = `${cls.name}:${cls.packageName}`;
+    
+    if (classMap.has(key)) {
+      // Merge methods from duplicate class
+      const existing = classMap.get(key)!;
+      const existingMethodNames = new Set(existing.methods.map(m => m.name));
+      
+      cls.methods.forEach(method => {
+        if (!existingMethodNames.has(method.name)) {
+          existing.methods.push(method);
+        }
+      });
+      
+      console.log(`Merged duplicate class: ${cls.name} (package: ${cls.packageName})`);
+    } else {
+      classMap.set(key, { ...cls, id: generateId() }); // Generate new ID to avoid XML ID conflicts
+    }
+  });
+  
+  // Step 3: Ensure all sequence diagram classes are represented
+  const finalClasses: ClassInfo[] = [];
+  
+  // Add classes that appear in sequence diagrams first
+  sequenceClassNames.forEach(className => {
+    // Look for this class in our deduplicated class map
+    let found = false;
+    for (const [key, cls] of classMap.entries()) {
+      if (cls.name === className) {
+        finalClasses.push(cls);
+        classMap.delete(key); // Remove so we don't add it again
+        found = true;
+        break;
+      }
+    }
+    
+    // If class from sequence diagram is not found in class diagram, create a basic one
+    if (!found) {
+      finalClasses.push({
+        id: generateId(),
+        name: className,
+        packageName: 'default',
+        methods: [], // No methods available from sequence diagram alone
+        relatedFunctions: []
+      });
+      console.log(`Created basic class for sequence diagram class: ${className}`);
+    }
+  });
+  
+  // Add remaining classes from class diagram that don't appear in sequence diagrams
+  for (const cls of classMap.values()) {
+    finalClasses.push(cls);
+  }
+  
+  console.log(`Final deduplicated classes: ${finalClasses.length}`);
+  console.log('Class names:', finalClasses.map(c => `${c.name} (${c.packageName})`));
+  
+  return finalClasses;
 };
 
 // Process uploaded Class Diagram file with improved deduplication
@@ -582,7 +692,7 @@ export const processClassDiagramFile = async (file: File): Promise<ClassInfo[] |
   }
 };
 
-// Map functions to classes based on sequence diagrams
+// Enhanced map functions to classes with REF diagram support
 export const mapFunctionsToClasses = (
   functions: SystemFunction[],
   sequenceDiagrams: SequenceDiagram[],
@@ -603,58 +713,66 @@ export const mapFunctionsToClasses = (
     console.log(`Mapped diagram: ${diagram.name} with ${diagram.objects.length} objects`);
   });
   
-  // For each function, find related classes through sequence diagrams
+  // Helper function to get all classes from a diagram and its references recursively
+  const getClassesFromDiagramRecursively = (diagramName: string, visited = new Set<string>()): Set<string> => {
+    if (visited.has(diagramName)) {
+      return new Set<string>(); // Avoid infinite recursion
+    }
+    visited.add(diagramName);
+    
+    const classNames = new Set<string>();
+    const diagram = diagramMap.get(diagramName);
+    
+    if (diagram) {
+      // Add classes from this diagram
+      diagram.objects.forEach(obj => {
+        if (obj.type && obj.type !== 'unknown' && obj.type !== 'ACTOR' && obj.type !== 'REF') {
+          classNames.add(obj.type);
+        }
+      });
+      
+      // Recursively add classes from referenced diagrams
+      diagram.references.forEach(ref => {
+        if (ref.diagramName) {
+          const referencedClasses = getClassesFromDiagramRecursively(ref.diagramName, visited);
+          referencedClasses.forEach(className => classNames.add(className));
+        }
+      });
+    }
+    
+    return classNames;
+  };
+  
+  // For each function, find related classes through sequence diagrams and their references
   functions.forEach(func => {
     console.log(`\nProcessing function: ${func.name} (${func.id})`);
     console.log(`Function sequence diagrams: ${func.sequenceDiagramNames}`);
     
     const diagramNames = func.sequenceDiagramNames;
     
-    // Get set of class names from the sequence diagrams
+    // Get set of class names from the sequence diagrams and their references
     const relatedClassNames = new Set<string>();
     
     diagramNames.forEach(diagramName => {
       console.log(`Looking for diagram: ${diagramName}`);
-      const diagram = diagramMap.get(diagramName);
-      if (diagram) {
-        console.log(`Found diagram: ${diagramName} with objects:`, diagram.objects.map(o => ({ name: o.name, type: o.type })));
-        
-        // Add all object types as related classes
-        diagram.objects.forEach(obj => {
-          if (obj.type && obj.type !== 'unknown' && obj.type !== 'ACTOR' && obj.type !== 'REF') {
-            relatedClassNames.add(obj.type);
-            console.log(`Added class from object: ${obj.type} (from object: ${obj.name})`);
-          }
-        });
-        
-        // Process references to other diagrams
-        diagram.references.forEach(ref => {
-          if (ref.diagramName) {
-            const refDiagram = diagramMap.get(ref.diagramName);
-            if (refDiagram) {
-              refDiagram.objects.forEach(obj => {
-                if (obj.type && obj.type !== 'unknown' && obj.type !== 'ACTOR' && obj.type !== 'REF') {
-                  relatedClassNames.add(obj.type);
-                  console.log(`Added class from reference: ${obj.type}`);
-                }
-              });
-            }
-          }
-        });
-      } else {
-        console.log(`Diagram not found: ${diagramName}`);
-        // Try to find diagram with partial name matching
+      const classesFromDiagram = getClassesFromDiagramRecursively(diagramName);
+      classesFromDiagram.forEach(className => {
+        relatedClassNames.add(className);
+        console.log(`Added class: ${className} from diagram chain starting with ${diagramName}`);
+      });
+      
+      // Also try partial name matching as fallback
+      if (!diagramMap.has(diagramName)) {
         const possibleDiagrams = sequenceDiagrams.filter(d => 
           d.name.includes(diagramName) || diagramName.includes(d.name)
         );
         if (possibleDiagrams.length > 0) {
           console.log(`Found possible matches:`, possibleDiagrams.map(d => d.name));
           possibleDiagrams.forEach(diagram => {
-            diagram.objects.forEach(obj => {
-              if (obj.type && obj.type !== 'unknown' && obj.type !== 'ACTOR' && obj.type !== 'REF') {
-                relatedClassNames.add(obj.type);
-                console.log(`Added class from partial match: ${obj.type}`);
-              }
+            const classesFromPartialMatch = getClassesFromDiagramRecursively(diagram.name);
+            classesFromPartialMatch.forEach(className => {
+              relatedClassNames.add(className);
+              console.log(`Added class from partial match: ${className}`);
             });
           });
         }
