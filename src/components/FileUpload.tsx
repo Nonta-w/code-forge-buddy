@@ -1,4 +1,3 @@
-
 import { useState, useCallback } from 'react';
 import { useDropzone } from 'react-dropzone';
 import { toast } from 'sonner';
@@ -14,10 +13,18 @@ import {
   TooltipProvider,
   TooltipTrigger,
 } from "@/components/ui/tooltip";
+import RefProcessingStatus from './RefProcessingStatus';
 
 export default function FileUpload() {
-  const { addFile, isLoading, setCurrentStep, uploadedFiles } = useApp();
+  const { addFile, isLoading, setCurrentStep, uploadedFiles, sequenceDiagrams } = useApp();
   const [activeTab, setActiveTab] = useState<FileType>('rtm');
+  const [lastProcessedReferences, setLastProcessedReferences] = useState<Array<{
+    id: string;
+    name: string;
+    diagramName?: string;
+    found: boolean;
+  }>>([]);
+  const [generatedStubs, setGeneratedStubs] = useState<string[]>([]);
   
   // Check if RTM file has been uploaded
   const hasRtmFile = uploadedFiles.some(file => file.type === 'rtm');
@@ -43,13 +50,71 @@ export default function FileUpload() {
         }
         
         // Process file
-        await addFile(file, activeTab);
+        const result = await addFile(file, activeTab);
+        
+        // If this is a sequence diagram, check for REF boxes and show status
+        if (activeTab === 'sequenceDiagram' && result) {
+          const diagram = sequenceDiagrams.find(d => d.name === file.name.replace('.xml', ''));
+          if (diagram && diagram.references.length > 0) {
+            console.log('Processing REF boxes for diagram:', diagram.name);
+            
+            // Check which referenced diagrams exist
+            const referencesWithStatus = diagram.references.map(ref => {
+              const found = sequenceDiagrams.some(d => {
+                // Enhanced matching logic
+                if (!ref.diagramName) return false;
+                
+                // Try exact match
+                if (d.name === ref.diagramName) return true;
+                
+                // Try case-insensitive match
+                if (d.name.toLowerCase() === ref.diagramName.toLowerCase()) return true;
+                
+                // Try partial match
+                if (d.name.toLowerCase().includes(ref.diagramName.toLowerCase()) ||
+                    ref.diagramName.toLowerCase().includes(d.name.toLowerCase())) return true;
+                
+                return false;
+              });
+              
+              return {
+                id: ref.id,
+                name: ref.name,
+                diagramName: ref.diagramName,
+                found
+              };
+            });
+            
+            setLastProcessedReferences(referencesWithStatus);
+            
+            // Simulate additional stubs that would be generated
+            const foundRefs = referencesWithStatus.filter(ref => ref.found);
+            const stubNames = foundRefs.map(ref => `${ref.diagramName}Stub.java`);
+            setGeneratedStubs(stubNames);
+            
+            // Show summary toast
+            const foundCount = foundRefs.length;
+            const totalCount = referencesWithStatus.length;
+            
+            if (foundCount === totalCount && totalCount > 0) {
+              toast.success(`All ${totalCount} referenced diagrams found! Additional stubs will be generated.`);
+            } else if (foundCount > 0) {
+              toast.warning(`${foundCount}/${totalCount} referenced diagrams found. Upload missing diagrams for complete processing.`);
+            } else if (totalCount > 0) {
+              toast.warning(`${totalCount} referenced diagrams missing. Upload them for complete processing.`);
+            }
+          } else {
+            // Clear status if no references
+            setLastProcessedReferences([]);
+            setGeneratedStubs([]);
+          }
+        }
       } catch (error) {
         console.error('Error in onDrop:', error);
         toast.error('Error uploading file');
       }
     },
-    [activeTab, addFile]
+    [activeTab, addFile, sequenceDiagrams]
   );
   
   const { getRootProps, getInputProps, isDragActive } = useDropzone({
@@ -154,6 +219,12 @@ export default function FileUpload() {
               {isLoading ? 'Uploading...' : 'Select File'}
             </Button>
           </div>
+          
+          {/* Show REF processing status for sequence diagrams */}
+          <RefProcessingStatus 
+            references={lastProcessedReferences}
+            generatedStubs={generatedStubs}
+          />
         </TabsContent>
         
         <TabsContent value="classDiagram" className="mt-0">
