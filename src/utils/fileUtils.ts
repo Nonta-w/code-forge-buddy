@@ -201,6 +201,7 @@ function findBestColumnMatch(headers: string[], possibleNames: string[]): number
 }
 
 // Process uploaded Sequence Diagram file
+// Enhanced processSequenceDiagramFile function with ref box support
 export const processSequenceDiagramFile = async (file: File): Promise<SequenceDiagram | null> => {
   try {
     const content = await readFileAsText(file);
@@ -316,7 +317,7 @@ export const processSequenceDiagramFile = async (file: File): Promise<SequenceDi
         }
       }
 
-      // Process InteractionOccurrence (REF objects)
+      // Process InteractionOccurrence (REF objects) - ENHANCED
       const occurrences = shapes.getElementsByTagName('InteractionOccurrence');
       for (let i = 0; i < occurrences.length; i++) {
         const occurrence = occurrences[i];
@@ -391,17 +392,70 @@ export const processSequenceDiagramFile = async (file: File): Promise<SequenceDi
       }
     }
 
-    // Extract references (empty for now, can be enhanced later)
+    // ENHANCED: Extract references with better ref box detection
     const references: Reference[] = [];
 
-    console.log('Processed sequence diagram:', { diagramId, diagramName, objects: objects.length, messages: messages.length });
+    // Look for InteractionOccurrence models in the frame that reference other diagrams
+    const occurrenceModels = frame.getElementsByTagName('InteractionOccurrence');
+    for (let i = 0; i < occurrenceModels.length; i++) {
+      const occurrenceModel = occurrenceModels[i];
+      const refId = occurrenceModel.getAttribute('Id') || generateId();
+      const refName = occurrenceModel.getAttribute('Name') || `Ref${i}`;
+
+      // Try to extract referenced diagram name from the occurrence
+      let referencedDiagramName = null;
+
+      // Method 1: Check for CoveredInteraction
+      const coveredInteraction = occurrenceModel.getElementsByTagName('CoveredInteraction')[0];
+      if (coveredInteraction) {
+        const interactionRef = coveredInteraction.getElementsByTagName('Interaction')[0];
+        if (interactionRef) {
+          referencedDiagramName = interactionRef.getAttribute('Name');
+        }
+      }
+
+      // Method 2: Check for InteractionReference
+      const interactionRef = occurrenceModel.getElementsByTagName('InteractionReference')[0];
+      if (interactionRef) {
+        referencedDiagramName = interactionRef.getAttribute('Name') ||
+          interactionRef.getAttribute('Idref');
+      }
+
+      // Method 3: Parse from the ref name itself if it looks like a diagram reference
+      if (!referencedDiagramName && refName) {
+        // Common patterns: "ref ProcessDeposit", "ProcessDeposit", "sd ProcessDeposit"
+        const cleanRefName = refName.replace(/^(ref\s+|sd\s+)/i, '').trim();
+        if (cleanRefName && cleanRefName !== refName) {
+          referencedDiagramName = cleanRefName;
+        } else if (refName.includes('ProcessDeposit') || refName.includes('process')) {
+          referencedDiagramName = refName;
+        }
+      }
+
+      references.push({
+        id: refId,
+        name: refName,
+        diagramName: referencedDiagramName || undefined
+      });
+
+      console.log(`Added reference: ${refName} -> ${referencedDiagramName || 'unknown'}`);
+    }
+
+    console.log('Processed sequence diagram:', {
+      diagramId,
+      diagramName,
+      objects: objects.length,
+      messages: messages.length,
+      references: references.length
+    });
 
     if (objects.length === 0) {
       toast.warning('No objects found in the sequence diagram');
     } else if (messages.length === 0) {
       toast.warning('No messages found in the sequence diagram');
     } else {
-      toast.success(`Successfully processed sequence diagram with ${objects.length} objects and ${messages.length} messages`);
+      const refInfo = references.length > 0 ? ` and ${references.length} references` : '';
+      toast.success(`Successfully processed sequence diagram with ${objects.length} objects, ${messages.length} messages${refInfo}`);
     }
 
     return {
@@ -661,12 +715,13 @@ export const processClassDiagramFile = async (file: File): Promise<ClassInfo[] |
 };
 
 // Map functions to classes based on sequence diagrams
+// Enhanced mapFunctionsToClasses function with ref box support
 export const mapFunctionsToClasses = (
   functions: SystemFunction[],
   sequenceDiagrams: SequenceDiagram[],
   classes: ClassInfo[]
 ): ClassInfo[] => {
-  console.log('=== Function to Class Mapping Debug ===');
+  console.log('=== Enhanced Function to Class Mapping Debug ===');
   console.log('Functions:', functions);
   console.log('Sequence Diagrams:', sequenceDiagrams);
   console.log('Classes:', classes.map(c => ({ name: c.name, id: c.id })));
@@ -678,8 +733,103 @@ export const mapFunctionsToClasses = (
   const diagramMap = new Map<string, SequenceDiagram>();
   sequenceDiagrams.forEach(diagram => {
     diagramMap.set(diagram.name, diagram);
-    console.log(`Mapped diagram: ${diagram.name} with ${diagram.objects.length} objects`);
+    console.log(`Mapped diagram: ${diagram.name} with ${diagram.objects.length} objects and ${diagram.references.length} references`);
   });
+
+  // Helper function to get all related class names from a diagram (including referenced diagrams)
+  const getRelatedClassNamesFromDiagram = (diagram: SequenceDiagram, visited: Set<string> = new Set()): Set<string> => {
+    const relatedClassNames = new Set<string>();
+
+    // Prevent infinite recursion
+    if (visited.has(diagram.name)) {
+      return relatedClassNames;
+    }
+    visited.add(diagram.name);
+
+    console.log(`Getting class names from diagram: ${diagram.name}`);
+
+    // Add all object types as related classes
+    diagram.objects.forEach(obj => {
+      if (obj.type && obj.type !== 'unknown' && obj.type !== 'ACTOR' && obj.type !== 'REF') {
+        relatedClassNames.add(obj.type);
+        console.log(`Added class from object: ${obj.type} (from object: ${obj.name})`);
+      }
+    });
+
+    // Process references to other diagrams - ENHANCED
+    diagram.references.forEach(ref => {
+      console.log(`Processing reference: ${ref.name} -> ${ref.diagramName}`);
+
+      if (ref.diagramName) {
+        // Try exact match first
+        let refDiagram = diagramMap.get(ref.diagramName);
+
+        // If not found, try fuzzy matching
+        if (!refDiagram) {
+          console.log(`Exact match not found for ${ref.diagramName}, trying fuzzy matching...`);
+
+          // Try case-insensitive matching
+          for (const [diagName, diag] of diagramMap.entries()) {
+            if (diagName.toLowerCase() === ref.diagramName.toLowerCase()) {
+              refDiagram = diag;
+              console.log(`Found case-insensitive match: ${diagName}`);
+              break;
+            }
+          }
+
+          // Try partial matching
+          if (!refDiagram) {
+            for (const [diagName, diag] of diagramMap.entries()) {
+              if (diagName.includes(ref.diagramName) || ref.diagramName.includes(diagName)) {
+                refDiagram = diag;
+                console.log(`Found partial match: ${diagName} for ${ref.diagramName}`);
+                break;
+              }
+            }
+          }
+
+          // Try matching against common patterns
+          if (!refDiagram) {
+            const normalizedRefName = ref.diagramName.toLowerCase()
+              .replace(/^(ref\s+|sd\s+)/i, '')
+              .replace(/[_\s-]+/g, '')
+              .trim();
+
+            for (const [diagName, diag] of diagramMap.entries()) {
+              const normalizedDiagName = diagName.toLowerCase()
+                .replace(/[_\s-]+/g, '')
+                .trim();
+
+              if (normalizedDiagName.includes(normalizedRefName) ||
+                normalizedRefName.includes(normalizedDiagName)) {
+                refDiagram = diag;
+                console.log(`Found normalized match: ${diagName} for ${ref.diagramName}`);
+                break;
+              }
+            }
+          }
+        }
+
+        if (refDiagram) {
+          console.log(`Found referenced diagram: ${refDiagram.name}`);
+          // Recursively get classes from referenced diagram
+          const referencedClasses = getRelatedClassNamesFromDiagram(refDiagram, visited);
+          referencedClasses.forEach(className => {
+            relatedClassNames.add(className);
+            console.log(`Added class from reference ${ref.diagramName}: ${className}`);
+          });
+        } else {
+          console.log(`Referenced diagram not found: ${ref.diagramName}`);
+          // Log available diagrams for debugging
+          console.log('Available diagrams:', Array.from(diagramMap.keys()));
+        }
+      } else {
+        console.log(`Reference ${ref.name} has no diagram name specified`);
+      }
+    });
+
+    return relatedClassNames;
+  };
 
   // For each function, find related classes through sequence diagrams
   functions.forEach(func => {
@@ -688,69 +838,45 @@ export const mapFunctionsToClasses = (
 
     const diagramNames = func.sequenceDiagramNames;
 
-    // Get set of class names from the sequence diagrams
-    const relatedClassNames = new Set<string>();
+    // Get set of class names from the sequence diagrams (including referenced diagrams)
+    const allRelatedClassNames = new Set<string>();
 
     diagramNames.forEach(diagramName => {
       console.log(`Looking for diagram: ${diagramName}`);
       const diagram = diagramMap.get(diagramName);
       if (diagram) {
-        console.log(`Found diagram: ${diagramName} with objects:`, diagram.objects.map(o => ({ name: o.name, type: o.type })));
-
-        // Add all object types as related classes
-        diagram.objects.forEach(obj => {
-          if (obj.type && obj.type !== 'unknown' && obj.type !== 'ACTOR' && obj.type !== 'REF') {
-            relatedClassNames.add(obj.type);
-            console.log(`Added class from object: ${obj.type} (from object: ${obj.name})`);
-          }
-        });
-
-        // Process references to other diagrams
-        diagram.references.forEach(ref => {
-          if (ref.diagramName) {
-            const refDiagram = diagramMap.get(ref.diagramName);
-            if (refDiagram) {
-              refDiagram.objects.forEach(obj => {
-                if (obj.type && obj.type !== 'unknown' && obj.type !== 'ACTOR' && obj.type !== 'REF') {
-                  relatedClassNames.add(obj.type);
-                  console.log(`Added class from reference: ${obj.type}`);
-                }
-              });
-            }
-          }
-        });
+        console.log(`Found diagram: ${diagramName}`);
+        const classNamesFromDiagram = getRelatedClassNamesFromDiagram(diagram);
+        classNamesFromDiagram.forEach(className => allRelatedClassNames.add(className));
       } else {
         console.log(`Diagram not found: ${diagramName}`);
         // Try to find diagram with partial name matching
         const possibleDiagrams = sequenceDiagrams.filter(d =>
-          d.name.includes(diagramName) || diagramName.includes(d.name)
+          d.name.toLowerCase().includes(diagramName.toLowerCase()) ||
+          diagramName.toLowerCase().includes(d.name.toLowerCase())
         );
         if (possibleDiagrams.length > 0) {
           console.log(`Found possible matches:`, possibleDiagrams.map(d => d.name));
           possibleDiagrams.forEach(diagram => {
-            diagram.objects.forEach(obj => {
-              if (obj.type && obj.type !== 'unknown' && obj.type !== 'ACTOR' && obj.type !== 'REF') {
-                relatedClassNames.add(obj.type);
-                console.log(`Added class from partial match: ${obj.type}`);
-              }
-            });
+            const classNamesFromDiagram = getRelatedClassNamesFromDiagram(diagram);
+            classNamesFromDiagram.forEach(className => allRelatedClassNames.add(className));
           });
         }
       }
     });
 
-    console.log(`Related class names for function ${func.name}:`, Array.from(relatedClassNames));
+    console.log(`All related class names for function ${func.name} (including refs):`, Array.from(allRelatedClassNames));
 
     // Update classes with related functions
     updatedClasses.forEach((cls: ClassInfo) => {
-      if (relatedClassNames.has(cls.name)) {
+      if (allRelatedClassNames.has(cls.name)) {
         cls.relatedFunctions = [...new Set([...cls.relatedFunctions, func.id])];
         console.log(`Added function ${func.id} to class ${cls.name}`);
       }
     });
   });
 
-  console.log('=== Final mapping results ===');
+  console.log('=== Final enhanced mapping results ===');
   updatedClasses.forEach((cls: ClassInfo) => {
     if (cls.relatedFunctions.length > 0) {
       console.log(`Class ${cls.name} related to functions: ${cls.relatedFunctions}`);
@@ -934,4 +1060,132 @@ public class ${cls.name}Driver {\n
 
   code += '}\n';
   return code;
+};
+
+// Helper function to generate basic stub when class definition is not available
+export const generateBasicStubCode = (className: string): string => {
+  const generateCommonMethodsForClass = (className: string): string => {
+    const lowerClassName = className.toLowerCase();
+    let methods = '';
+
+    if (lowerClassName.includes('service')) {
+      methods += `
+    public String processRequest(String request) {
+        System.out.println("${className}Stub processing request: " + request);
+        return "processed_" + request;
+    }
+    
+    public boolean isAvailable() {
+        return true;
+    }`;
+    }
+
+    if (lowerClassName.includes('dao') || lowerClassName.includes('repository')) {
+      methods += `
+    public Object save(Object entity) {
+        System.out.println("${className}Stub saving entity");
+        return entity;
+    }
+    
+    public Object findById(String id) {
+        System.out.println("${className}Stub finding by id: " + id);
+        return new Object(); // Mock entity
+    }
+    
+    public boolean delete(String id) {
+        System.out.println("${className}Stub deleting id: " + id);
+        return true;
+    }`;
+    }
+
+    if (lowerClassName.includes('controller')) {
+      methods += `
+    public String handleRequest(String action, Object data) {
+        System.out.println("${className}Stub handling request: " + action);
+        return "success";
+    }`;
+    }
+
+    if (lowerClassName.includes('manager') || lowerClassName.includes('handler')) {
+      methods += `
+    public void execute() {
+        System.out.println("${className}Stub executing");
+    }
+    
+    public String getStatus() {
+        return "ready";
+    }`;
+    }
+
+    return methods;
+  };
+
+  return `/**
+ * Basic Stub for ${className}
+ * Generated on ${new Date().toISOString()}
+ * Note: Class definition not found, this is a minimal stub
+ */
+public class ${className}Stub {
+    
+    public ${className}Stub() {
+        // Default constructor
+        System.out.println("${className}Stub created");
+    }
+    
+    // Add commonly expected methods based on class name
+    ${generateCommonMethodsForClass(className)}
+    
+    // Generic method to handle any calls
+    public Object handleCall(String methodName, Object... args) {
+        System.out.println("Stub method called: " + methodName + " on ${className}Stub");
+        return null;
+    }
+}
+`;
+};
+
+// Helper function to generate basic driver when class definition is not available
+export const generateBasicDriverCode = (driverClassName: string, targetClassName: string): string => {
+  return `import org.junit.Test;
+import static org.junit.Assert.*;
+
+/**
+ * Basic Driver for ${driverClassName}
+ * Generated on ${new Date().toISOString()}
+ * Note: Class definition not found, this is a minimal driver
+ */
+public class ${driverClassName}Driver {
+    
+    private ${targetClassName} targetObject;
+    
+    public void setUp() {
+        targetObject = new ${targetClassName}();
+    }
+    
+    @Test
+    public void testBasicInteraction() {
+        setUp();
+        
+        // Basic test to verify the target object can be created and interacted with
+        assertNotNull(targetObject);
+        System.out.println("${driverClassName}Driver successfully created ${targetClassName} object");
+        
+        // TODO: Add specific test methods based on your requirements
+        // This driver was generated because ${driverClassName} calls ${targetClassName}
+    }
+    
+    @Test
+    public void testDriverFunctionality() {
+        setUp();
+        
+        // Test that demonstrates ${driverClassName} can drive ${targetClassName}
+        try {
+            // TODO: Implement specific driver logic here
+            System.out.println("Driver test completed successfully");
+        } catch (Exception e) {
+            fail("Driver test failed: " + e.getMessage());
+        }
+    }
+}
+`;
 };

@@ -1,3 +1,4 @@
+// Updated types/index.ts - Replace your Reference interface with this
 
 export type FileType = 'rtm' | 'sequenceDiagram' | 'classDiagram';
 
@@ -64,7 +65,7 @@ export interface Message {
 export interface Reference {
   id: string;
   name: string;
-  diagramName?: string;
+  diagramName?: string; // ADD THIS FIELD - this is the key fix
 }
 
 export interface GeneratedCode {

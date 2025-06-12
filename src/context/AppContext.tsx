@@ -220,6 +220,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
   };
 
   // Generate code
+  // Enhanced generateCode function with ref box support
   const generateCode = () => {
     try {
       setIsGenerating(true);
@@ -238,10 +239,17 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
       const selectedClassNames = new Set(selectedClasses.map(cls => cls.name));
       const callGraph = new Map<string, Set<string>>(); // caller -> called classes
 
-      // Build call graph from sequence diagrams
-      // Build call graph from sequence diagrams
-      sequenceDiagrams.forEach(diagram => {
-        console.log(`Processing diagram: ${diagram.name}`);
+      // Helper function to process a diagram and its references recursively
+      const processSequenceDiagramRecursively = (diagram: SequenceDiagram, visited: Set<string> = new Set()) => {
+        // Prevent infinite recursion
+        if (visited.has(diagram.name)) {
+          return;
+        }
+        visited.add(diagram.name);
+
+        console.log(`Processing diagram: ${diagram.name} for call graph`);
+
+        // Process messages in current diagram
         diagram.messages.forEach(message => {
           console.log(`Processing message: ${message.name}, type: ${message.type}, from->to: ${message.from}->${message.to}`);
 
@@ -251,15 +259,22 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
           if (fromObj && toObj && fromObj.type && toObj.type) {
             console.log(`Message: ${fromObj.type} -> ${toObj.type} (${message.name})`);
 
-            // Skip return messages and self-calls
+            // Skip return messages, self-calls, and certain system messages
             if (message.name && (
               message.name.toLowerCase().includes('return') ||
               message.name.toLowerCase().includes('response') ||
-              message.name.toLowerCase().includes('transaction') || // Add this line
+              message.name.toLowerCase().includes('transaction') ||
               message.type === 'return' ||
               fromObj.type === toObj.type // Skip self-calls
             )) {
               console.log(`Skipping message: ${message.name} (${fromObj.type} -> ${toObj.type})`);
+              return;
+            }
+
+            // Skip messages to/from actors and refs
+            if (fromObj.type === 'ACTOR' || toObj.type === 'ACTOR' ||
+              fromObj.type === 'REF' || toObj.type === 'REF') {
+              console.log(`Skipping actor/ref message: ${message.name}`);
               return;
             }
 
@@ -271,9 +286,56 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
             console.log(`Added to call graph: ${fromObj.type} calls ${toObj.type}`);
           }
         });
+
+        // Process references to other diagrams - ENHANCED
+        diagram.references.forEach(ref => {
+          console.log(`Processing reference: ${ref.name} -> ${ref.diagramName}`);
+
+          if (ref.diagramName) {
+            // Find the referenced diagram
+            let refDiagram = sequenceDiagrams.find(d => d.name === ref.diagramName);
+
+            // Try fuzzy matching if exact match not found
+            if (!refDiagram) {
+              refDiagram = sequenceDiagrams.find(d =>
+                d.name.toLowerCase().includes(ref.diagramName.toLowerCase()) ||
+                ref.diagramName.toLowerCase().includes(d.name.toLowerCase())
+              );
+            }
+
+            // Try normalized matching
+            if (!refDiagram) {
+              const normalizedRefName = ref.diagramName.toLowerCase()
+                .replace(/^(ref\s+|sd\s+)/i, '')
+                .replace(/[_\s-]+/g, '')
+                .trim();
+
+              refDiagram = sequenceDiagrams.find(d => {
+                const normalizedDiagName = d.name.toLowerCase()
+                  .replace(/[_\s-]+/g, '')
+                  .trim();
+                return normalizedDiagName.includes(normalizedRefName) ||
+                  normalizedRefName.includes(normalizedDiagName);
+              });
+            }
+
+            if (refDiagram) {
+              console.log(`Found referenced diagram: ${refDiagram.name}, processing recursively...`);
+              processSequenceDiagramRecursively(refDiagram, visited);
+            } else {
+              console.log(`Referenced diagram not found: ${ref.diagramName}`);
+              console.log('Available diagrams:', sequenceDiagrams.map(d => d.name));
+            }
+          }
+        });
+      };
+
+      // Build call graph from sequence diagrams (including referenced diagrams)
+      sequenceDiagrams.forEach(diagram => {
+        processSequenceDiagramRecursively(diagram);
       });
 
-      console.log('Call graph:', callGraph);
+      console.log('Enhanced call graph (including refs):', callGraph);
       console.log('Selected classes for testing:', selectedClassNames);
 
       // For each selected class (class under test), generate needed stubs and drivers
@@ -282,6 +344,8 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
 
         // 1. Generate STUBS for classes that are CALLED BY the class under test
         const calledClasses = callGraph.get(classUnderTest.name) || new Set<string>();
+        console.log(`Classes called by ${classUnderTest.name}:`, Array.from(calledClasses));
+
         calledClasses.forEach(calledClassName => {
           // Only create stub if the called class is not also under test
           if (!selectedClassNames.has(calledClassName)) {
@@ -301,6 +365,23 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
                 generatedFileNames.add(stubFileName);
                 console.log(`Generated stub for ${calledClassName} (called by ${classUnderTest.name})`);
               }
+            } else {
+              console.log(`Class ${calledClassName} not found in class map, creating basic stub`);
+              // Create a basic stub even if we don't have the class definition
+              const stubFileName = `${calledClassName}Stub.java`;
+              if (!generatedFileNames.has(stubFileName)) {
+                const basicStubCode = generateBasicStubCode(calledClassName);
+                newGeneratedCodes.push({
+                  id: generateId(),
+                  fileName: stubFileName,
+                  fileContent: basicStubCode,
+                  type: 'stub',
+                  timestamp: new Date(),
+                  relatedClass: calledClassName
+                });
+                generatedFileNames.add(stubFileName);
+                console.log(`Generated basic stub for ${calledClassName} (class definition not found)`);
+              }
             }
           }
         });
@@ -311,22 +392,36 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
             // This caller class calls our class under test
             // Only create driver if the caller is not also under test
             if (!selectedClassNames.has(callerClassName)) {
-              const driverFileName = `${callerClassName}Driver.java`; // FIXED: Generate driver for the CALLER
+              const driverFileName = `${callerClassName}Driver.java`;
               if (!generatedFileNames.has(driverFileName)) {
                 // Find the caller class info to generate proper driver
                 const callerClass = classMap.get(callerClassName);
                 if (callerClass) {
-                  const driverCode = generateDriverCode(callerClass); // FIXED: Generate driver for CALLER class
+                  const driverCode = generateDriverCode(callerClass);
                   newGeneratedCodes.push({
                     id: generateId(),
                     fileName: driverFileName,
                     fileContent: driverCode,
                     type: 'driver',
                     timestamp: new Date(),
-                    relatedClass: callerClassName // FIXED: Driver is for the CALLER
+                    relatedClass: callerClassName
                   });
                   generatedFileNames.add(driverFileName);
                   console.log(`Generated driver for ${callerClassName} (to call ${classUnderTest.name})`);
+                } else {
+                  console.log(`Class ${callerClassName} not found in class map, creating basic driver`);
+                  // Create a basic driver even if we don't have the class definition
+                  const basicDriverCode = generateBasicDriverCode(callerClassName, classUnderTest.name);
+                  newGeneratedCodes.push({
+                    id: generateId(),
+                    fileName: driverFileName,
+                    fileContent: basicDriverCode,
+                    type: 'driver',
+                    timestamp: new Date(),
+                    relatedClass: callerClassName
+                  });
+                  generatedFileNames.add(driverFileName);
+                  console.log(`Generated basic driver for ${callerClassName} (class definition not found)`);
                 }
               }
             }
@@ -334,62 +429,42 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
         });
       });
 
-      // If no stubs or drivers were generated, create at least a basic driver for each selected class
-      // if (newGeneratedCodes.length === 0) {
-      //   selectedClasses.forEach(selectedClass => {
-      //     const driverFileName = `${selectedClass.name}Driver.java`;
-      //     if (!generatedFileNames.has(driverFileName)) {
-      //       const driverCode = generateDriverCode(selectedClass);
-      //       newGeneratedCodes.push({
-      //         id: generateId(),
-      //         fileName: driverFileName,
-      //         fileContent: driverCode,
-      //         type: 'driver',
-      //         timestamp: new Date(),
-      //         relatedClass: selectedClass.name
-      //       });
-      //       generatedFileNames.add(driverFileName);
-      //       console.log(`Generated default driver for ${selectedClass.name}`);
-      //     }
-      //   });
-      // }
       // Check if any stubs or drivers were generated
       if (newGeneratedCodes.length === 0) {
         // No stubs or drivers needed - inform the user
         const selectedClassNames = selectedClasses.map(cls => cls.name).join(', ');
         toast.success(`No stubs or drivers needed for ${selectedClassNames}. The selected classes can be tested independently without additional test infrastructure.`);
 
-        // Optional: Create a summary file explaining why no files were generated
+        // Create a summary file explaining why no files were generated
         const summaryContent = `Test Analysis Summary
-      Generated on: ${new Date().toISOString()}
+Generated on: ${new Date().toISOString()}
 
-      Selected Classes for Testing: ${selectedClassNames}
+Selected Classes for Testing: ${selectedClassNames}
 
-      Analysis Results:
-      - No external callers found that require drivers
-      - No dependencies found that require stubs
-      - The selected classes appear to be self-contained or only use standard library classes
+Analysis Results:
+- No external callers found that require drivers
+- No dependencies found that require stubs
+- The selected classes appear to be self-contained or only use standard library classes
 
-      Recommendation:
-      The selected classes can be tested directly using standard unit testing frameworks (JUnit, TestNG, etc.) without additional stub or driver infrastructure.
-      `;
+Recommendation:
+The selected classes can be tested directly using standard unit testing frameworks (JUnit, TestNG, etc.) without additional stub or driver infrastructure.
+
+Call Graph Analysis:
+${Array.from(callGraph.entries()).map(([caller, called]) =>
+          `${caller} -> [${Array.from(called).join(', ')}]`
+        ).join('\n')}
+`;
 
         const summaryCode: GeneratedCode = {
           id: generateId(),
           fileName: 'TestAnalysisSummary.txt',
           fileContent: summaryContent,
-          type: 'driver', // or create a new type 'summary'
+          type: 'driver',
           timestamp: new Date(),
           relatedClass: 'Analysis'
         };
 
         newGeneratedCodes.push(summaryCode);
-        setCurrentStep(4); // Still move to code view to show the summary
-      } else {
-        // Normal success message when files are generated
-        const sessionName = selectedClasses.map(cls => cls.name).join(', ');
-        toast.success(`Generated ${newGeneratedCodes.length} code files for testing: ${sessionName}`);
-        setCurrentStep(4);
       }
 
       // Create new session
@@ -405,13 +480,147 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
       setGeneratedCodes(prev => [...prev, ...newGeneratedCodes]);
       setCodeSessions(prev => [...prev, newSession]);
       setCurrentStep(4); // Move to code view
-      toast.success(`Generated ${newGeneratedCodes.length} code files for testing: ${sessionName}`);
+
+      const fileCount = newGeneratedCodes.filter(code => code.fileName !== 'TestAnalysisSummary.txt').length;
+
+      if (fileCount > 0) {
+        toast.success(`Generated ${fileCount} code files for testing: ${sessionName}`);
+      }
     } catch (error) {
       console.error('Error generating code:', error);
       toast.error('Failed to generate code');
     } finally {
       setIsGenerating(false);
     }
+  };
+
+  // Helper function to generate basic stub when class definition is not available
+  const generateBasicStubCode = (className: string): string => {
+    return `/**
+ * Basic Stub for ${className}
+ * Generated on ${new Date().toISOString()}
+ * Note: Class definition not found, this is a minimal stub
+ */
+public class ${className}Stub {
+    
+    public ${className}Stub() {
+        // Default constructor
+        System.out.println("${className}Stub created");
+    }
+    
+    // Add commonly expected methods based on class name
+    ${generateCommonMethodsForClass(className)}
+    
+    // Generic method to handle any calls
+    public Object handleCall(String methodName, Object... args) {
+        System.out.println("Stub method called: " + methodName + " on ${className}Stub");
+        return null;
+    }
+}
+`;
+  };
+
+  // Helper function to generate basic driver when class definition is not available
+  const generateBasicDriverCode = (driverClassName: string, targetClassName: string): string => {
+    return `import org.junit.Test;
+import static org.junit.Assert.*;
+
+/**
+ * Basic Driver for ${driverClassName}
+ * Generated on ${new Date().toISOString()}
+ * Note: Class definition not found, this is a minimal driver
+ */
+public class ${driverClassName}Driver {
+    
+    private ${targetClassName} targetObject;
+    
+    public void setUp() {
+        targetObject = new ${targetClassName}();
+    }
+    
+    @Test
+    public void testBasicInteraction() {
+        setUp();
+        
+        // Basic test to verify the target object can be created and interacted with
+        assertNotNull(targetObject);
+        System.out.println("${driverClassName}Driver successfully created ${targetClassName} object");
+        
+        // TODO: Add specific test methods based on your requirements
+        // This driver was generated because ${driverClassName} calls ${targetClassName}
+    }
+    
+    @Test
+    public void testDriverFunctionality() {
+        setUp();
+        
+        // Test that demonstrates ${driverClassName} can drive ${targetClassName}
+        try {
+            // TODO: Implement specific driver logic here
+            System.out.println("Driver test completed successfully");
+        } catch (Exception e) {
+            fail("Driver test failed: " + e.getMessage());
+        }
+    }
+}
+`;
+  };
+
+  // Helper function to generate common methods based on class name patterns
+  const generateCommonMethodsForClass = (className: string): string => {
+    const lowerClassName = className.toLowerCase();
+    let methods = '';
+
+    if (lowerClassName.includes('service')) {
+      methods += `
+    public String processRequest(String request) {
+        System.out.println("${className}Stub processing request: " + request);
+        return "processed_" + request;
+    }
+    
+    public boolean isAvailable() {
+        return true;
+    }`;
+    }
+
+    if (lowerClassName.includes('dao') || lowerClassName.includes('repository')) {
+      methods += `
+    public Object save(Object entity) {
+        System.out.println("${className}Stub saving entity");
+        return entity;
+    }
+    
+    public Object findById(String id) {
+        System.out.println("${className}Stub finding by id: " + id);
+        return new Object(); // Mock entity
+    }
+    
+    public boolean delete(String id) {
+        System.out.println("${className}Stub deleting id: " + id);
+        return true;
+    }`;
+    }
+
+    if (lowerClassName.includes('controller')) {
+      methods += `
+    public String handleRequest(String action, Object data) {
+        System.out.println("${className}Stub handling request: " + action);
+        return "success";
+    }`;
+    }
+
+    if (lowerClassName.includes('manager') || lowerClassName.includes('handler')) {
+      methods += `
+    public void execute() {
+        System.out.println("${className}Stub executing");
+    }
+    
+    public String getStatus() {
+        return "ready";
+    }`;
+    }
+
+    return methods;
   };
 
   // Reset all state
