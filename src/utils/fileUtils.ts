@@ -886,46 +886,40 @@ export const mapFunctionsToClasses = (
   return updatedClasses;
 };
 
-// Generate stub code for a class
+// Generate stub code for a class with enhanced return values
 export const generateStubCode = (cls: ClassInfo): string => {
-  const packageLine = cls.packageName ? `package ${cls.packageName};\n\n` : '';
+  const packageLine = cls.packageName && cls.packageName !== 'default' ? `package ${cls.packageName};\n\n` : '';
 
   let code = `${packageLine}/**
- * Stub for ${cls.name}
+ * Enhanced Stub for ${cls.name}
  * Generated on ${new Date().toISOString()}
+ * Features: Enhanced return values and console logging
  */
 public class ${cls.name}Stub {\n`;
 
-  // Add stub methods - ensure we have methods to generate
+  // Add stub methods with enhanced return value generation
   if (cls.methods && cls.methods.length > 0) {
     cls.methods.forEach(method => {
       // Generate method signature
       const paramsList = method.parameters.map(p => `${p.type} ${p.name}`).join(', ');
       code += `    ${method.visibility} ${method.returnType} ${method.name}(${paramsList}) {\n`;
-
-      // Generate return statement based on return type with more realistic values
-      if (method.returnType === 'void') {
-        code += '        // Stub implementation\n        System.out.println("Stub method called: ' + method.name + '");\n';
-      } else if (['int', 'Integer'].includes(method.returnType)) {
-        code += '        return 42;\n';
-      } else if (['byte', 'Byte'].includes(method.returnType)) {
-        code += '        return (byte) 1;\n';
-      } else if (['short', 'Short'].includes(method.returnType)) {
-        code += '        return (short) 100;\n';
-      } else if (['long', 'Long'].includes(method.returnType)) {
-        code += '        return 1000L;\n';
-      } else if (['float', 'Float'].includes(method.returnType)) {
-        code += '        return 3.14f;\n';
-      } else if (['double', 'Double'].includes(method.returnType)) {
-        code += '        return 2.718;\n';
-      } else if (['boolean', 'Boolean'].includes(method.returnType)) {
-        code += '        return true;\n';
-      } else if (['char', 'Character'].includes(method.returnType)) {
-        code += "        return 'X';\n";
-      } else if (method.returnType === 'String') {
-        code += `        return "stub_${method.name.toLowerCase()}_result";\n`;
+      
+      // Add console logging with parameter info
+      const paramNames = method.parameters.map(p => p.name).join(', ');
+      if (paramNames) {
+        code += `        System.out.println("${cls.name}Stub.${method.name}() called with: ${method.parameters.map(p => p.name + '=" + ' + p.name + ' + "').join(', ')}");\n`;
       } else {
-        code += '        return null; // TODO: Return appropriate stub object\n';
+        code += `        System.out.println("${cls.name}Stub.${method.name}() called");\n`;
+      }
+
+      // Enhanced return value generation based on method type and context
+      if (method.returnType === 'void') {
+        code += '        // Stub implementation - no return value\n';
+      } else {
+        const returnValue = generateEnhancedReturnValue(method.returnType, method.name, cls.name);
+        code += `        ${method.returnType} result = ${returnValue};\n`;
+        code += '        System.out.println("Returning: " + result);\n';
+        code += '        return result;\n';
       }
 
       code += '    }\n\n';
@@ -933,12 +927,253 @@ public class ${cls.name}Stub {\n`;
   } else {
     // Add a default constructor if no methods are found
     code += `    public ${cls.name}Stub() {\n`;
-    code += '        // Default stub constructor\n';
+    code += `        System.out.println("${cls.name}Stub constructor called");\n`;
     code += '    }\n\n';
   }
 
   code += '}\n';
   return code;
+};
+
+// Enhanced return value generator based on method type and context
+const generateEnhancedReturnValue = (returnType: string, methodName: string, className: string): string => {
+  const lowerMethodName = methodName.toLowerCase();
+  const lowerClassName = className.toLowerCase();
+
+  // Context-aware return values based on method name patterns
+  if (returnType === 'boolean' || returnType === 'Boolean') {
+    if (lowerMethodName.startsWith('is') || lowerMethodName.startsWith('has') || lowerMethodName.startsWith('can')) {
+      return 'true';
+    } else if (lowerMethodName.includes('valid') || lowerMethodName.includes('exist')) {
+      return 'true';
+    } else if (lowerMethodName.includes('delete') || lowerMethodName.includes('save')) {
+      return 'true'; // Success operations
+    }
+    return 'true';
+  }
+
+  if (returnType === 'String') {
+    if (lowerMethodName.includes('id') || lowerMethodName.includes('key')) {
+      return `"stub_${methodName.toLowerCase()}_12345"`;
+    } else if (lowerMethodName.includes('name')) {
+      return `"Stub${className}Name"`;
+    } else if (lowerMethodName.includes('status')) {
+      return '"ACTIVE"';
+    } else if (lowerMethodName.includes('message') || lowerMethodName.includes('error')) {
+      return `"Stub message from ${methodName}"`;
+    } else if (lowerMethodName.includes('process') || lowerMethodName.includes('execute')) {
+      return '"SUCCESS"';
+    }
+    return `"stub_${methodName.toLowerCase()}_result"`;
+  }
+
+  // Numeric types with context awareness
+  if (['int', 'Integer'].includes(returnType)) {
+    if (lowerMethodName.includes('count') || lowerMethodName.includes('size')) {
+      return '5';
+    } else if (lowerMethodName.includes('id')) {
+      return '12345';
+    } else if (lowerMethodName.includes('amount') || lowerMethodName.includes('total')) {
+      return '1000';
+    }
+    return '42';
+  }
+
+  if (['long', 'Long'].includes(returnType)) {
+    if (lowerMethodName.includes('time') || lowerMethodName.includes('timestamp')) {
+      return 'System.currentTimeMillis()';
+    } else if (lowerMethodName.includes('id')) {
+      return '123456789L';
+    }
+    return '1000L';
+  }
+
+  if (['double', 'Double'].includes(returnType)) {
+    if (lowerMethodName.includes('amount') || lowerMethodName.includes('price') || lowerMethodName.includes('total')) {
+      return '99.99';
+    } else if (lowerMethodName.includes('rate') || lowerMethodName.includes('percent')) {
+      return '0.05';
+    }
+    return '2.718';
+  }
+
+  if (['float', 'Float'].includes(returnType)) {
+    if (lowerMethodName.includes('rate') || lowerMethodName.includes('percent')) {
+      return '0.15f';
+    }
+    return '3.14f';
+  }
+
+  // Handle other primitive types
+  if (['byte', 'Byte'].includes(returnType)) return '(byte) 1';
+  if (['short', 'Short'].includes(returnType)) return '(short) 100';
+  if (['char', 'Character'].includes(returnType)) return "'X'";
+
+  // Handle collection types
+  if (returnType.includes('List') || returnType.includes('ArrayList')) {
+    return 'new java.util.ArrayList<>()';
+  }
+  if (returnType.includes('Set') || returnType.includes('HashSet')) {
+    return 'new java.util.HashSet<>()';
+  }
+  if (returnType.includes('Map') || returnType.includes('HashMap')) {
+    return 'new java.util.HashMap<>()';
+  }
+
+  // Handle common object types
+  if (returnType.includes('Date')) {
+    return 'new java.util.Date()';
+  }
+  if (returnType.includes('BigDecimal')) {
+    return 'new java.math.BigDecimal("100.00")';
+  }
+
+  // Default for unknown object types
+  return 'null // TODO: Return appropriate stub object';
+};
+
+// Enhanced basic stub generation with better fallback support
+export const generateBasicStubCode = (className: string): string => {
+  const generateSmartMethodsForClass = (className: string): string => {
+    const lowerClassName = className.toLowerCase();
+    let methods = '';
+
+    // Service layer methods
+    if (lowerClassName.includes('service')) {
+      methods += `
+    public String processRequest(String request) {
+        System.out.println("${className}Stub processing request: " + request);
+        return "PROCESSED_" + request;
+    }
+    
+    public boolean isAvailable() {
+        System.out.println("${className}Stub.isAvailable() called");
+        return true;
+    }
+    
+    public Object execute(Object data) {
+        System.out.println("${className}Stub.execute() called with: " + data);
+        return "EXECUTED_SUCCESS";
+    }`;
+    }
+
+    // Data Access Object methods
+    if (lowerClassName.includes('dao') || lowerClassName.includes('repository')) {
+      methods += `
+    public Object save(Object entity) {
+        System.out.println("${className}Stub saving entity: " + entity);
+        return entity;
+    }
+    
+    public Object findById(String id) {
+        System.out.println("${className}Stub finding by id: " + id);
+        return new Object(); // Mock entity with id: " + id
+    }
+    
+    public boolean delete(String id) {
+        System.out.println("${className}Stub deleting id: " + id);
+        return true;
+    }
+    
+    public java.util.List<Object> findAll() {
+        System.out.println("${className}Stub.findAll() called");
+        return new java.util.ArrayList<>();
+    }`;
+    }
+
+    // Controller methods
+    if (lowerClassName.includes('controller')) {
+      methods += `
+    public String handleRequest(String action, Object data) {
+        System.out.println("${className}Stub handling request: " + action + " with data: " + data);
+        return "SUCCESS";
+    }
+    
+    public Object processAction(String actionType) {
+        System.out.println("${className}Stub processing action: " + actionType);
+        return "ACTION_COMPLETED";
+    }`;
+    }
+
+    // Manager/Handler methods
+    if (lowerClassName.includes('manager') || lowerClassName.includes('handler')) {
+      methods += `
+    public void execute() {
+        System.out.println("${className}Stub.execute() called");
+    }
+    
+    public String getStatus() {
+        System.out.println("${className}Stub.getStatus() called");
+        return "READY";
+    }
+    
+    public boolean initialize() {
+        System.out.println("${className}Stub.initialize() called");
+        return true;
+    }`;
+    }
+
+    // Utility class methods
+    if (lowerClassName.includes('util') || lowerClassName.includes('helper')) {
+      methods += `
+    public static String format(Object value) {
+        System.out.println("${className}Stub.format() called with: " + value);
+        return String.valueOf(value);
+    }
+    
+    public static boolean validate(Object input) {
+        System.out.println("${className}Stub.validate() called with: " + input);
+        return true;
+    }`;
+    }
+
+    // Factory methods
+    if (lowerClassName.includes('factory')) {
+      methods += `
+    public Object create(String type) {
+        System.out.println("${className}Stub.create() called for type: " + type);
+        return new Object(); // Mock object of type: " + type
+    }
+    
+    public Object getInstance() {
+        System.out.println("${className}Stub.getInstance() called");
+        return new Object();
+    }`;
+    }
+
+    return methods;
+  };
+
+  return `/**
+ * Enhanced Basic Stub for ${className}
+ * Generated on ${new Date().toISOString()}
+ * Note: Class definition not found - generated with smart fallback methods
+ */
+public class ${className}Stub {
+    
+    public ${className}Stub() {
+        System.out.println("${className}Stub constructor called - fallback stub created");
+    }
+    
+    // Smart methods based on class name patterns${generateSmartMethodsForClass(className)}
+    
+    // Generic method to handle any unexpected calls
+    public Object handleCall(String methodName, Object... args) {
+        System.out.println("${className}Stub.handleCall() - Method: " + methodName + ", Args: " + java.util.Arrays.toString(args));
+        return "GENERIC_RESULT_" + methodName;
+    }
+    
+    // Common getter/setter pattern support
+    public Object get(String property) {
+        System.out.println("${className}Stub.get() called for property: " + property);
+        return "stub_" + property + "_value";
+    }
+    
+    public void set(String property, Object value) {
+        System.out.println("${className}Stub.set() called - Property: " + property + ", Value: " + value);
+    }
+}
+`;
 };
 
 // Generate driver code for a class
@@ -1054,7 +1289,7 @@ public class ${cls.name}Driver {\n
     code += `    @Test\n    public void testDefaultConstructor() {\n`;
     code += `        // Test that the object can be created\n`;
     code += `        assertNotNull(testObject);\n`;
-    code += `        System.out.println("${cls.name} object created successfully");\n`;
+    code += `        System.out.println("${cls.name}Driver successfully created ${cls.name} object");\n`;
     code += '    }\n\n';
   }
 
@@ -1064,56 +1299,110 @@ public class ${cls.name}Driver {\n
 
 // Helper function to generate basic stub when class definition is not available
 export const generateBasicStubCode = (className: string): string => {
-  const generateCommonMethodsForClass = (className: string): string => {
+  const generateSmartMethodsForClass = (className: string): string => {
     const lowerClassName = className.toLowerCase();
     let methods = '';
 
+    // Service layer methods
     if (lowerClassName.includes('service')) {
       methods += `
     public String processRequest(String request) {
         System.out.println("${className}Stub processing request: " + request);
-        return "processed_" + request;
+        return "PROCESSED_" + request;
     }
     
     public boolean isAvailable() {
+        System.out.println("${className}Stub.isAvailable() called");
         return true;
+    }
+    
+    public Object execute(Object data) {
+        System.out.println("${className}Stub.execute() called with: " + data);
+        return "EXECUTED_SUCCESS";
     }`;
     }
 
+    // Data Access Object methods
     if (lowerClassName.includes('dao') || lowerClassName.includes('repository')) {
       methods += `
     public Object save(Object entity) {
-        System.out.println("${className}Stub saving entity");
+        System.out.println("${className}Stub saving entity: " + entity);
         return entity;
     }
     
     public Object findById(String id) {
         System.out.println("${className}Stub finding by id: " + id);
-        return new Object(); // Mock entity
+        return new Object(); // Mock entity with id: " + id
     }
     
     public boolean delete(String id) {
         System.out.println("${className}Stub deleting id: " + id);
         return true;
+    }
+    
+    public java.util.List<Object> findAll() {
+        System.out.println("${className}Stub.findAll() called");
+        return new java.util.ArrayList<>();
     }`;
     }
 
+    // Controller methods
     if (lowerClassName.includes('controller')) {
       methods += `
     public String handleRequest(String action, Object data) {
-        System.out.println("${className}Stub handling request: " + action);
-        return "success";
+        System.out.println("${className}Stub handling request: " + action + " with data: " + data);
+        return "SUCCESS";
+    }
+    
+    public Object processAction(String actionType) {
+        System.out.println("${className}Stub processing action: " + actionType);
+        return "ACTION_COMPLETED";
     }`;
     }
 
+    // Manager/Handler methods
     if (lowerClassName.includes('manager') || lowerClassName.includes('handler')) {
       methods += `
     public void execute() {
-        System.out.println("${className}Stub executing");
+        System.out.println("${className}Stub.execute() called");
     }
     
     public String getStatus() {
-        return "ready";
+        System.out.println("${className}Stub.getStatus() called");
+        return "READY";
+    }
+    
+    public boolean initialize() {
+        System.out.println("${className}Stub.initialize() called");
+        return true;
+    }`;
+    }
+
+    // Utility class methods
+    if (lowerClassName.includes('util') || lowerClassName.includes('helper')) {
+      methods += `
+    public static String format(Object value) {
+        System.out.println("${className}Stub.format() called with: " + value);
+        return String.valueOf(value);
+    }
+    
+    public static boolean validate(Object input) {
+        System.out.println("${className}Stub.validate() called with: " + input);
+        return true;
+    }`;
+    }
+
+    // Factory methods
+    if (lowerClassName.includes('factory')) {
+      methods += `
+    public Object create(String type) {
+        System.out.println("${className}Stub.create() called for type: " + type);
+        return new Object(); // Mock object of type: " + type
+    }
+    
+    public Object getInstance() {
+        System.out.println("${className}Stub.getInstance() called");
+        return new Object();
     }`;
     }
 
@@ -1133,7 +1422,7 @@ public class ${className}Stub {
     }
     
     // Add commonly expected methods based on class name
-    ${generateCommonMethodsForClass(className)}
+    ${generateSmartMethodsForClass(className)}
     
     // Generic method to handle any calls
     public Object handleCall(String methodName, Object... args) {
@@ -1188,4 +1477,3 @@ public class ${driverClassName}Driver {
     }
 }
 `;
-};
