@@ -15,6 +15,7 @@ import {
   mapFunctionsToClasses,
   generateStubCode,
   generateDriverCode,
+  generateServiceStubCode,
   generateId
 } from '@/utils/fileUtils';
 
@@ -220,7 +221,9 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
   };
 
   // Generate code
-  // Enhanced generateCode function with ref box support
+  // Add this function to your AppContext.tsx in the generateCode function
+  // Replace the existing generateCode function with this enhanced version
+
   const generateCode = () => {
     try {
       setIsGenerating(true);
@@ -238,6 +241,51 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
       // Find which classes need stubs and drivers based on interaction with selected classes
       const selectedClassNames = new Set(selectedClasses.map(cls => cls.name));
       const callGraph = new Map<string, Set<string>>(); // caller -> called classes
+
+      // Helper function to map REF operations to likely class names
+      const mapOperationToClassName = (operationName: string): string => {
+        const lowerOp = operationName.toLowerCase();
+
+        // Common patterns for operation-to-class mapping
+        if (lowerOp.includes('deposit')) {
+          return 'TransactionService'; // or DepositService
+        }
+        if (lowerOp.includes('withdraw')) {
+          return 'TransactionService'; // or WithdrawService
+        }
+        if (lowerOp.includes('transfer')) {
+          return 'TransactionService'; // or TransferService
+        }
+        if (lowerOp.includes('process')) {
+          return 'TransactionService';
+        }
+        if (lowerOp.includes('insert') || lowerOp.includes('save') || lowerOp.includes('store')) {
+          return 'DataService';
+        }
+        if (lowerOp.includes('update') || lowerOp.includes('modify')) {
+          return 'DataService';
+        }
+        if (lowerOp.includes('transform') || lowerOp.includes('convert')) {
+          return 'TransformService';
+        }
+        if (lowerOp.includes('validate') || lowerOp.includes('check')) {
+          return 'ValidationService';
+        }
+        if (lowerOp.includes('calculate') || lowerOp.includes('compute')) {
+          return 'CalculationService';
+        }
+        if (lowerOp.includes('request') || lowerOp.includes('call')) {
+          return 'RequestService';
+        }
+        if (lowerOp.includes('response') || lowerOp.includes('reply')) {
+          return 'ResponseService';
+        }
+
+        // Default: try to derive from operation name
+        // processDeposit -> ProcessDepositService
+        const capitalized = operationName.charAt(0).toUpperCase() + operationName.slice(1);
+        return capitalized + 'Service';
+      };
 
       // Helper function to process a diagram and its references recursively
       const processSequenceDiagramRecursively = (diagram: SequenceDiagram, visited: Set<string> = new Set()) => {
@@ -287,12 +335,12 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
           }
         });
 
-        // Process references to other diagrams - ENHANCED
+        // Enhanced REF processing - map operations to classes and add them to call graph
         diagram.references.forEach(ref => {
           console.log(`Processing reference: ${ref.name} -> ${ref.diagramName}`);
 
           if (ref.diagramName) {
-            // Find the referenced diagram
+            // Try to find the referenced diagram first
             let refDiagram = sequenceDiagrams.find(d => d.name === ref.diagramName);
 
             // Try fuzzy matching if exact match not found
@@ -303,28 +351,54 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
               );
             }
 
-            // Try normalized matching
-            if (!refDiagram) {
-              const normalizedRefName = ref.diagramName.toLowerCase()
-                .replace(/^(ref\s+|sd\s+)/i, '')
-                .replace(/[_\s-]+/g, '')
-                .trim();
-
-              refDiagram = sequenceDiagrams.find(d => {
-                const normalizedDiagName = d.name.toLowerCase()
-                  .replace(/[_\s-]+/g, '')
-                  .trim();
-                return normalizedDiagName.includes(normalizedRefName) ||
-                  normalizedRefName.includes(normalizedDiagName);
-              });
-            }
-
             if (refDiagram) {
               console.log(`Found referenced diagram: ${refDiagram.name}, processing recursively...`);
               processSequenceDiagramRecursively(refDiagram, visited);
             } else {
-              console.log(`Referenced diagram not found: ${ref.diagramName}`);
-              console.log('Available diagrams:', sequenceDiagrams.map(d => d.name));
+              // REF points to an operation, not a diagram - map to a service class
+              console.log(`Referenced diagram not found: ${ref.diagramName}, treating as operation`);
+
+              const serviceClassName = mapOperationToClassName(ref.diagramName);
+              console.log(`Mapped operation "${ref.diagramName}" to service class: ${serviceClassName}`);
+
+              // Find the object that contains this REF to determine which class calls the service
+              const refObject = diagram.objects.find(obj => obj.name === ref.name || obj.type === 'REF');
+              if (refObject) {
+                // Look for messages involving this REF object to find caller
+                diagram.messages.forEach(msg => {
+                  const fromObj = diagram.objects.find(obj => obj.id === msg.from);
+                  const toObj = diagram.objects.find(obj => obj.id === msg.to);
+
+                  // If message is to/from REF object, establish call relationship
+                  if (fromObj && toObj) {
+                    if (msg.to === refObject.id && fromObj.type !== 'ACTOR' && fromObj.type !== 'REF') {
+                      // fromObj calls the service
+                      if (!callGraph.has(fromObj.type)) {
+                        callGraph.set(fromObj.type, new Set<string>());
+                      }
+                      callGraph.get(fromObj.type)?.add(serviceClassName);
+                      console.log(`Added REF call to graph: ${fromObj.type} calls ${serviceClassName} (via ${ref.diagramName})`);
+                    }
+                    if (msg.from === refObject.id && toObj.type !== 'ACTOR' && toObj.type !== 'REF') {
+                      // service calls toObj (less common, but possible)
+                      if (!callGraph.has(serviceClassName)) {
+                        callGraph.set(serviceClassName, new Set<string>());
+                      }
+                      callGraph.get(serviceClassName)?.add(toObj.type);
+                      console.log(`Added REF call to graph: ${serviceClassName} calls ${toObj.type} (via ${ref.diagramName})`);
+                    }
+                  }
+                });
+              } else {
+                // Fallback: assume the main class under test calls this service
+                selectedClasses.forEach(cls => {
+                  if (!callGraph.has(cls.name)) {
+                    callGraph.set(cls.name, new Set<string>());
+                  }
+                  callGraph.get(cls.name)?.add(serviceClassName);
+                  console.log(`Added fallback REF call: ${cls.name} calls ${serviceClassName} (via ${ref.diagramName})`);
+                });
+              }
             }
           }
         });
@@ -335,7 +409,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
         processSequenceDiagramRecursively(diagram);
       });
 
-      console.log('Enhanced call graph (including refs):', callGraph);
+      console.log('Enhanced call graph (including REF operations):', callGraph);
       console.log('Selected classes for testing:', selectedClassNames);
 
       // For each selected class (class under test), generate needed stubs and drivers
@@ -351,6 +425,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
           if (!selectedClassNames.has(calledClassName)) {
             const calledClass = classMap.get(calledClassName);
             if (calledClass) {
+              // We have the class definition, generate detailed stub
               const stubFileName = `${calledClassName}Stub.java`;
               if (!generatedFileNames.has(stubFileName)) {
                 const stubCode = generateStubCode(calledClass);
@@ -363,24 +438,24 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
                   relatedClass: calledClassName
                 });
                 generatedFileNames.add(stubFileName);
-                console.log(`Generated stub for ${calledClassName} (called by ${classUnderTest.name})`);
+                console.log(`Generated detailed stub for ${calledClassName} (called by ${classUnderTest.name})`);
               }
             } else {
-              console.log(`Class ${calledClassName} not found in class map, creating basic stub`);
-              // Create a basic stub even if we don't have the class definition
+              // No class definition, but we know it's needed - generate basic stub
+              console.log(`Class ${calledClassName} not found in class map, creating service stub`);
               const stubFileName = `${calledClassName}Stub.java`;
               if (!generatedFileNames.has(stubFileName)) {
-                const basicStubCode = generateBasicStubCode(calledClassName);
+                const serviceStubCode = generateServiceStubCode(calledClassName);
                 newGeneratedCodes.push({
                   id: generateId(),
                   fileName: stubFileName,
-                  fileContent: basicStubCode,
+                  fileContent: serviceStubCode,
                   type: 'stub',
                   timestamp: new Date(),
                   relatedClass: calledClassName
                 });
                 generatedFileNames.add(stubFileName);
-                console.log(`Generated basic stub for ${calledClassName} (class definition not found)`);
+                console.log(`Generated service stub for ${calledClassName} (class definition not found)`);
               }
             }
           }
@@ -433,31 +508,26 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
       if (newGeneratedCodes.length === 0) {
         // No stubs or drivers needed - inform the user
         const selectedClassNames = selectedClasses.map(cls => cls.name).join(', ');
-        toast.success(`No stubs or drivers needed for ${selectedClassNames}. The selected classes can be tested independently without additional test infrastructure.`);
+        toast.success(`${selectedClassNames} can be tested independently - no additional stubs/drivers needed.`);
 
-        // Create a summary file explaining why no files were generated
+        // Create a brief summary file
         const summaryContent = `Test Analysis Summary
-Generated on: ${new Date().toISOString()}
+Generated: ${new Date().toLocaleString()}
 
-Selected Classes for Testing: ${selectedClassNames}
+Selected: ${selectedClassNames}
 
-Analysis Results:
-- No external callers found that require drivers
-- No dependencies found that require stubs
-- The selected classes appear to be self-contained or only use standard library classes
+Result: No stubs or drivers required.
+These classes can be tested directly with JUnit/TestNG.
 
-Recommendation:
-The selected classes can be tested directly using standard unit testing frameworks (JUnit, TestNG, etc.) without additional stub or driver infrastructure.
-
-Call Graph Analysis:
+Call Graph:
 ${Array.from(callGraph.entries()).map(([caller, called]) =>
-          `${caller} -> [${Array.from(called).join(', ')}]`
+          `${caller} → [${Array.from(called).join(', ')}]`
         ).join('\n')}
 `;
 
         const summaryCode: GeneratedCode = {
           id: generateId(),
-          fileName: 'TestAnalysisSummary.txt',
+          fileName: 'TestSummary.txt',
           fileContent: summaryContent,
           type: 'driver',
           timestamp: new Date(),
@@ -493,6 +563,7 @@ ${Array.from(callGraph.entries()).map(([caller, called]) =>
       setIsGenerating(false);
     }
   };
+
 
   // Helper function to generate basic stub when class definition is not available
   const generateBasicStubCode = (className: string): string => {
@@ -749,3 +820,4 @@ export const useApp = (): AppContextType => {
   }
   return context;
 };
+

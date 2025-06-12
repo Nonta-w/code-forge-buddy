@@ -200,7 +200,106 @@ function findBestColumnMatch(headers: string[], possibleNames: string[]): number
   return -1;
 }
 
-// Process uploaded Sequence Diagram file
+// Add this function BEFORE the processSequenceDiagramFile function
+// (around line 200-250 in your fileUtils.ts)
+
+// Enhanced REF name matching patterns
+const enhanceRefNameMatching = (refName: string): string[] => {
+  if (!refName) return [];
+
+  const variations: string[] = [];
+  const cleaned = refName.trim();
+
+  // Add original name
+  variations.push(cleaned);
+
+  // Remove common prefixes
+  const withoutPrefixes = cleaned
+    .replace(/^(ref\s+|sd\s+|sequence\s+|diagram\s+)/i, '')
+    .trim();
+  if (withoutPrefixes !== cleaned) {
+    variations.push(withoutPrefixes);
+  }
+
+  // Handle camelCase to space separated
+  const spacesSeparated = cleaned.replace(/([a-z])([A-Z])/g, '$1 $2');
+  if (spacesSeparated !== cleaned) {
+    variations.push(spacesSeparated);
+  }
+
+  // Handle underscores and dashes
+  const normalized = cleaned.replace(/[_\-]/g, ' ');
+  if (normalized !== cleaned) {
+    variations.push(normalized);
+  }
+
+  // Handle common patterns like "ProcessDeposit" -> "Process Deposit"
+  const withSpaces = cleaned.replace(/([a-z])([A-Z])/g, '$1 $2');
+  if (withSpaces !== cleaned) {
+    variations.push(withSpaces);
+  }
+
+  // Handle operation name patterns - convert camelCase operations to potential diagram names
+  // processDeposit -> ProcessDeposit, Process Deposit, process-deposit
+  if (cleaned.match(/^[a-z]/)) {
+    // Capitalize first letter for potential class/diagram name
+    const capitalized = cleaned.charAt(0).toUpperCase() + cleaned.slice(1);
+    variations.push(capitalized);
+
+    // Add space-separated version of capitalized
+    const capitalizedWithSpaces = capitalized.replace(/([a-z])([A-Z])/g, '$1 $2');
+    variations.push(capitalizedWithSpaces);
+  }
+
+  // Add lowercase version
+  variations.push(cleaned.toLowerCase());
+
+  // Add potential diagram names by adding common suffixes
+  variations.push(cleaned + 'Diagram');
+  variations.push(cleaned + ' Diagram');
+
+  console.log(`REF name variations for "${refName}":`, variations);
+  return [...new Set(variations)]; // Remove duplicates
+};
+
+// Enhanced diagram matching function
+const findMatchingDiagram = (refName: string, diagrams: Map<string, SequenceDiagram>): SequenceDiagram | null => {
+  const variations = enhanceRefNameMatching(refName);
+
+  // Try exact matches first
+  for (const variation of variations) {
+    if (diagrams.has(variation)) {
+      console.log(`Found exact match for "${refName}" -> "${variation}"`);
+      return diagrams.get(variation)!;
+    }
+  }
+
+  // Try case-insensitive matches
+  for (const variation of variations) {
+    for (const [diagName, diagram] of diagrams.entries()) {
+      if (diagName.toLowerCase() === variation.toLowerCase()) {
+        console.log(`Found case-insensitive match for "${refName}" -> "${diagName}"`);
+        return diagram;
+      }
+    }
+  }
+
+  // Try partial matches
+  for (const variation of variations) {
+    for (const [diagName, diagram] of diagrams.entries()) {
+      if (diagName.toLowerCase().includes(variation.toLowerCase()) ||
+        variation.toLowerCase().includes(diagName.toLowerCase())) {
+        console.log(`Found partial match for "${refName}" -> "${diagName}"`);
+        return diagram;
+      }
+    }
+  }
+
+  console.log(`No match found for REF: "${refName}"`);
+  return null;
+};
+
+// REPLACE the entire processSequenceDiagramFile function with this complete version:
 export const processSequenceDiagramFile = async (file: File): Promise<SequenceDiagram | null> => {
   try {
     const content = await readFileAsText(file);
@@ -391,44 +490,92 @@ export const processSequenceDiagramFile = async (file: File): Promise<SequenceDi
       }
     }
 
-    // Extract references with better ref box detection
+    // Enhanced references extraction with better ref box detection
     const references: Reference[] = [];
 
-    // Look for InteractionOccurrence models in the frame that reference other diagrams
+    // Method 1: Extract from InteractionOccurrence models in the frame
     const occurrenceModels = frame.getElementsByTagName('InteractionOccurrence');
+    console.log(`Found ${occurrenceModels.length} InteractionOccurrence models for REF processing`);
+
     for (let i = 0; i < occurrenceModels.length; i++) {
       const occurrenceModel = occurrenceModels[i];
       const refId = occurrenceModel.getAttribute('Id') || generateId();
       const refName = occurrenceModel.getAttribute('Name') || `Ref${i}`;
 
-      // Try to extract referenced diagram name from the occurrence
+      console.log(`Processing REF occurrence: ${refName} (ID: ${refId})`);
+
       let referencedDiagramName = null;
 
-      // Method 1: Check for CoveredInteraction
-      const coveredInteraction = occurrenceModel.getElementsByTagName('CoveredInteraction')[0];
-      if (coveredInteraction) {
-        const interactionRef = coveredInteraction.getElementsByTagName('Interaction')[0];
-        if (interactionRef) {
-          referencedDiagramName = interactionRef.getAttribute('Name');
+      // Enhanced Method: Check for TransitFrom -> Operation pattern (like your example)
+      const transitFrom = occurrenceModel.getElementsByTagName('TransitFrom')[0];
+      if (transitFrom) {
+        const operation = transitFrom.getElementsByTagName('Operation')[0];
+        if (operation) {
+          // Get operation name from Name attribute
+          const operationName = operation.getAttribute('Name');
+          if (operationName) {
+            referencedDiagramName = operationName;
+            console.log(`Found referenced diagram via TransitFrom->Operation: ${referencedDiagramName}`);
+          }
+
+          // Also try Idref attribute as fallback
+          if (!referencedDiagramName) {
+            const operationIdref = operation.getAttribute('Idref');
+            if (operationIdref) {
+              // Try to find the operation definition by Idref
+              const allOperations = xmlDoc.getElementsByTagName('Operation');
+              for (let k = 0; k < allOperations.length; k++) {
+                if (allOperations[k].getAttribute('Id') === operationIdref) {
+                  referencedDiagramName = allOperations[k].getAttribute('Name');
+                  console.log(`Found referenced diagram via Idref lookup: ${referencedDiagramName}`);
+                  break;
+                }
+              }
+            }
+          }
         }
       }
 
-      // Method 2: Check for InteractionReference
-      const interactionRef = occurrenceModel.getElementsByTagName('InteractionReference')[0];
-      if (interactionRef) {
-        referencedDiagramName = interactionRef.getAttribute('Name') ||
-          interactionRef.getAttribute('Idref');
+      // Method 2: Check for CoveredInteraction (fallback)
+      if (!referencedDiagramName) {
+        const coveredInteraction = occurrenceModel.getElementsByTagName('CoveredInteraction')[0];
+        if (coveredInteraction) {
+          const interactionRef = coveredInteraction.getElementsByTagName('Interaction')[0];
+          if (interactionRef) {
+            referencedDiagramName = interactionRef.getAttribute('Name');
+            console.log(`Found referenced diagram via CoveredInteraction: ${referencedDiagramName}`);
+          }
+        }
       }
 
-      // Method 3: Parse from the ref name itself if it looks like a diagram reference
+      // Method 3: Extract from Messages that reference this occurrence
+      if (!referencedDiagramName) {
+        // Look for messages in ModelRelationshipContainer that might reference this occurrence
+        const allMessages = xmlDoc.getElementsByTagName('Message');
+        for (let j = 0; j < allMessages.length; j++) {
+          const msg = allMessages[j];
+          const transitFromMsg = msg.getElementsByTagName('TransitFrom')[0];
+          if (transitFromMsg) {
+            const operationInMsg = transitFromMsg.getElementsByTagName('Operation')[0];
+            if (operationInMsg) {
+              const msgOpName = operationInMsg.getAttribute('Name');
+              if (msgOpName && (msgOpName.toLowerCase().includes(refName.toLowerCase()) ||
+                refName.toLowerCase().includes(msgOpName.toLowerCase()))) {
+                referencedDiagramName = msgOpName;
+                console.log(`Found referenced diagram via Message operation: ${referencedDiagramName}`);
+                break;
+              }
+            }
+          }
+        }
+      }
+
+      // Method 4: Parse from the ref name itself if it looks like a diagram reference
       if (!referencedDiagramName && refName) {
-        // Common patterns: "ref ProcessDeposit", "ProcessDeposit", "sd ProcessDeposit"
-        const cleanRefName = refName.replace(/^(ref\s+|sd\s+)/i, '').trim();
-        if (cleanRefName && cleanRefName !== refName) {
-          referencedDiagramName = cleanRefName;
-        } else if (refName.includes('ProcessDeposit') || refName.includes('process')) {
-          referencedDiagramName = refName;
-        }
+        // Enhanced pattern matching for REF names
+        const variations = enhanceRefNameMatching(refName);
+        referencedDiagramName = variations[0]; // Use the first (cleaned) variation
+        console.log(`Using parsed REF name: ${referencedDiagramName}`);
       }
 
       references.push({
@@ -438,6 +585,37 @@ export const processSequenceDiagramFile = async (file: File): Promise<SequenceDi
       });
 
       console.log(`Added reference: ${refName} -> ${referencedDiagramName || 'unknown'}`);
+    }
+
+    // Method 2: Also check messages directly for operation calls that might be REF boxes
+    const allMessages = xmlDoc.getElementsByTagName('Message');
+    console.log(`Checking ${allMessages.length} messages for additional REF operations`);
+
+    for (let i = 0; i < allMessages.length; i++) {
+      const message = allMessages[i];
+      const transitFrom = message.getElementsByTagName('TransitFrom')[0];
+
+      if (transitFrom) {
+        const operation = transitFrom.getElementsByTagName('Operation')[0];
+        if (operation) {
+          const operationName = operation.getAttribute('Name');
+          const operationIdref = operation.getAttribute('Idref');
+
+          // Check if this operation might be a reference to another diagram
+          if (operationName && !references.some(ref => ref.diagramName === operationName)) {
+            // This looks like it might be a referenced operation/diagram
+            const refId = generateId();
+
+            references.push({
+              id: refId,
+              name: `REF_${operationName}`,
+              diagramName: operationName
+            });
+
+            console.log(`Added operation-based reference: REF_${operationName} -> ${operationName}`);
+          }
+        }
+      }
     }
 
     console.log('Processed sequence diagram:', {
@@ -1278,4 +1456,122 @@ const generateCommonMethodsForClass = (className: string): string => {
   }
 
   return methods;
+};
+
+// Generate service stub code for REF operations
+export const generateServiceStubCode = (serviceClassName: string): string => {
+  // Extract likely operations from the service name and common patterns
+  const generateServiceMethods = (className: string): string => {
+    const lowerClassName = className.toLowerCase();
+    let methods = '';
+
+    if (lowerClassName.includes('transaction')) {
+      methods += `
+    public String processDeposit(String accountId, double amount) {
+        System.out.println("${className}Stub.processDeposit() called with: accountId=" + accountId + ", amount=" + amount);
+        return "DEPOSIT_SUCCESS_" + System.currentTimeMillis();
+    }
+    
+    public String processWithdraw(String accountId, double amount) {
+        System.out.println("${className}Stub.processWithdraw() called with: accountId=" + accountId + ", amount=" + amount);
+        return "WITHDRAW_SUCCESS_" + System.currentTimeMillis();
+    }
+    
+    public String processTransfer(String fromAccount, String toAccount, double amount) {
+        System.out.println("${className}Stub.processTransfer() called");
+        return "TRANSFER_SUCCESS_" + System.currentTimeMillis();
+    }`;
+    }
+
+    if (lowerClassName.includes('data')) {
+      methods += `
+    public String insertDeposit(Object depositData) {
+        System.out.println("${className}Stub.insertDeposit() called");
+        return "INSERT_SUCCESS_" + System.currentTimeMillis();
+    }
+    
+    public boolean updateNetAmount(String accountId, double amount) {
+        System.out.println("${className}Stub.updateNetAmount() called with: accountId=" + accountId + ", amount=" + amount);
+        return true;
+    }
+    
+    public Object findById(String id) {
+        System.out.println("${className}Stub.findById() called with: id=" + id);
+        return new Object(); // Mock data object
+    }`;
+    }
+
+    if (lowerClassName.includes('transform')) {
+      methods += `
+    public Object transformRequest(Object request) {
+        System.out.println("${className}Stub.transformRequest() called");
+        return request; // Echo back transformed
+    }
+    
+    public Object transformResponse(Object response) {
+        System.out.println("${className}Stub.transformResponse() called");
+        return response; // Echo back transformed
+    }`;
+    }
+
+    if (lowerClassName.includes('validation')) {
+      methods += `
+    public boolean validateRequest(Object request) {
+        System.out.println("${className}Stub.validateRequest() called");
+        return true; // Always valid in stub
+    }
+    
+    public boolean checkBalance(String accountId, double amount) {
+        System.out.println("${className}Stub.checkBalance() called");
+        return true; // Sufficient balance in stub
+    }`;
+    }
+
+    if (lowerClassName.includes('calculation')) {
+      methods += `
+    public double calculateFee(double amount) {
+        System.out.println("${className}Stub.calculateFee() called with amount: " + amount);
+        return amount * 0.01; // 1% fee
+    }
+    
+    public double computeTotal(double amount, double fee) {
+        System.out.println("${className}Stub.computeTotal() called");
+        return amount + fee;
+    }`;
+    }
+
+    // Add generic service methods
+    methods += `
+    public String execute(String operation, Object... params) {
+        System.out.println("${className}Stub.execute() called with operation: " + operation);
+        return "SUCCESS";
+    }
+    
+    public boolean isAvailable() {
+        System.out.println("${className}Stub.isAvailable() called");
+        return true;
+    }
+    
+    public String getStatus() {
+        System.out.println("${className}Stub.getStatus() called");
+        return "ACTIVE";
+    }`;
+
+    return methods;
+  };
+
+  return `/**
+ * Service Stub for ${serviceClassName}
+ * Generated on ${new Date().toISOString()}
+ * This stub was created based on REF box operations in sequence diagrams
+ */
+public class ${serviceClassName}Stub {
+    
+    public ${serviceClassName}Stub() {
+        System.out.println("${serviceClassName}Stub created");
+    }
+    
+    ${generateServiceMethods(serviceClassName)}
+}
+`;
 };
