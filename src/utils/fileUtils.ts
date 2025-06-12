@@ -201,7 +201,6 @@ function findBestColumnMatch(headers: string[], possibleNames: string[]): number
 }
 
 // Process uploaded Sequence Diagram file
-// Enhanced processSequenceDiagramFile function with ref box support
 export const processSequenceDiagramFile = async (file: File): Promise<SequenceDiagram | null> => {
   try {
     const content = await readFileAsText(file);
@@ -317,7 +316,7 @@ export const processSequenceDiagramFile = async (file: File): Promise<SequenceDi
         }
       }
 
-      // Process InteractionOccurrence (REF objects) - ENHANCED
+      // Process InteractionOccurrence (REF objects)
       const occurrences = shapes.getElementsByTagName('InteractionOccurrence');
       for (let i = 0; i < occurrences.length; i++) {
         const occurrence = occurrences[i];
@@ -392,7 +391,7 @@ export const processSequenceDiagramFile = async (file: File): Promise<SequenceDi
       }
     }
 
-    // ENHANCED: Extract references with better ref box detection
+    // Extract references with better ref box detection
     const references: Reference[] = [];
 
     // Look for InteractionOccurrence models in the frame that reference other diagrams
@@ -503,9 +502,6 @@ export const processClassDiagramFile = async (file: File): Promise<ClassInfo[] |
       toast.error('Invalid Visual Paradigm XML format - no Models element');
       return null;
     }
-
-    // From: "// Get all Class elements under Models (including nested in packages)"
-    // To: "const classes = Array.from(classesMap.values());"
 
     // Get all Class elements under Models (including nested in packages)
     const classElements = modelsElement.getElementsByTagName('Class');
@@ -715,7 +711,6 @@ export const processClassDiagramFile = async (file: File): Promise<ClassInfo[] |
 };
 
 // Map functions to classes based on sequence diagrams
-// Enhanced mapFunctionsToClasses function with ref box support
 export const mapFunctionsToClasses = (
   functions: SystemFunction[],
   sequenceDiagrams: SequenceDiagram[],
@@ -756,7 +751,7 @@ export const mapFunctionsToClasses = (
       }
     });
 
-    // Process references to other diagrams - ENHANCED
+    // Process references to other diagrams
     diagram.references.forEach(ref => {
       console.log(`Processing reference: ${ref.name} -> ${ref.diagramName}`);
 
@@ -903,7 +898,7 @@ public class ${cls.name}Stub {\n`;
       // Generate method signature
       const paramsList = method.parameters.map(p => `${p.type} ${p.name}`).join(', ');
       code += `    ${method.visibility} ${method.returnType} ${method.name}(${paramsList}) {\n`;
-      
+
       // Add console logging with parameter info
       const paramNames = method.parameters.map(p => p.name).join(', ');
       if (paramNames) {
@@ -1032,162 +1027,21 @@ const generateEnhancedReturnValue = (returnType: string, methodName: string, cla
   return 'null // TODO: Return appropriate stub object';
 };
 
-// Enhanced basic stub generation with better fallback support
-export const generateBasicStubCode = (className: string): string => {
-  const generateSmartMethodsForClass = (className: string): string => {
-    const lowerClassName = className.toLowerCase();
-    let methods = '';
-
-    // Service layer methods
-    if (lowerClassName.includes('service')) {
-      methods += `
-    public String processRequest(String request) {
-        System.out.println("${className}Stub processing request: " + request);
-        return "PROCESSED_" + request;
-    }
-    
-    public boolean isAvailable() {
-        System.out.println("${className}Stub.isAvailable() called");
-        return true;
-    }
-    
-    public Object execute(Object data) {
-        System.out.println("${className}Stub.execute() called with: " + data);
-        return "EXECUTED_SUCCESS";
-    }`;
-    }
-
-    // Data Access Object methods
-    if (lowerClassName.includes('dao') || lowerClassName.includes('repository')) {
-      methods += `
-    public Object save(Object entity) {
-        System.out.println("${className}Stub saving entity: " + entity);
-        return entity;
-    }
-    
-    public Object findById(String id) {
-        System.out.println("${className}Stub finding by id: " + id);
-        return new Object(); // Mock entity with id: " + id
-    }
-    
-    public boolean delete(String id) {
-        System.out.println("${className}Stub deleting id: " + id);
-        return true;
-    }
-    
-    public java.util.List<Object> findAll() {
-        System.out.println("${className}Stub.findAll() called");
-        return new java.util.ArrayList<>();
-    }`;
-    }
-
-    // Controller methods
-    if (lowerClassName.includes('controller')) {
-      methods += `
-    public String handleRequest(String action, Object data) {
-        System.out.println("${className}Stub handling request: " + action + " with data: " + data);
-        return "SUCCESS";
-    }
-    
-    public Object processAction(String actionType) {
-        System.out.println("${className}Stub processing action: " + actionType);
-        return "ACTION_COMPLETED";
-    }`;
-    }
-
-    // Manager/Handler methods
-    if (lowerClassName.includes('manager') || lowerClassName.includes('handler')) {
-      methods += `
-    public void execute() {
-        System.out.println("${className}Stub.execute() called");
-    }
-    
-    public String getStatus() {
-        System.out.println("${className}Stub.getStatus() called");
-        return "READY";
-    }
-    
-    public boolean initialize() {
-        System.out.println("${className}Stub.initialize() called");
-        return true;
-    }`;
-    }
-
-    // Utility class methods
-    if (lowerClassName.includes('util') || lowerClassName.includes('helper')) {
-      methods += `
-    public static String format(Object value) {
-        System.out.println("${className}Stub.format() called with: " + value);
-        return String.valueOf(value);
-    }
-    
-    public static boolean validate(Object input) {
-        System.out.println("${className}Stub.validate() called with: " + input);
-        return true;
-    }`;
-    }
-
-    // Factory methods
-    if (lowerClassName.includes('factory')) {
-      methods += `
-    public Object create(String type) {
-        System.out.println("${className}Stub.create() called for type: " + type);
-        return new Object(); // Mock object of type: " + type
-    }
-    
-    public Object getInstance() {
-        System.out.println("${className}Stub.getInstance() called");
-        return new Object();
-    }`;
-    }
-
-    return methods;
-  };
-
-  return `/**
- * Enhanced Basic Stub for ${className}
- * Generated on ${new Date().toISOString()}
- * Note: Class definition not found - generated with smart fallback methods
- */
-public class ${className}Stub {
-    
-    public ${className}Stub() {
-        System.out.println("${className}Stub constructor called - fallback stub created");
-    }
-    
-    // Smart methods based on class name patterns${generateSmartMethodsForClass(className)}
-    
-    // Generic method to handle any unexpected calls
-    public Object handleCall(String methodName, Object... args) {
-        System.out.println("${className}Stub.handleCall() - Method: " + methodName + ", Args: " + java.util.Arrays.toString(args));
-        return "GENERIC_RESULT_" + methodName;
-    }
-    
-    // Common getter/setter pattern support
-    public Object get(String property) {
-        System.out.println("${className}Stub.get() called for property: " + property);
-        return "stub_" + property + "_value";
-    }
-    
-    public void set(String property, Object value) {
-        System.out.println("${className}Stub.set() called - Property: " + property + ", Value: " + value);
-    }
-}
-`;
-};
-
 // Generate driver code for a class
 export const generateDriverCode = (cls: ClassInfo): string => {
   const packageLine = cls.packageName ? `package ${cls.packageName};\n\n` : '';
 
-  let code = `${packageLine}import org.junit.Test;\n
+  let code = `${packageLine}import org.junit.Test;
+import static org.junit.Assert.*;
+
 /**
  * Test Driver for ${cls.name}
  * Generated on ${new Date().toISOString()}
  */
-public class ${cls.name}Driver {\n
+public class ${cls.name}Driver {
     private ${cls.name} testObject = new ${cls.name}();
-\n`;
+
+`;
 
   // Add test methods - ensure we have methods to test
   if (cls.methods && cls.methods.length > 0) {
@@ -1299,116 +1153,6 @@ public class ${cls.name}Driver {\n
 
 // Helper function to generate basic stub when class definition is not available
 export const generateBasicStubCode = (className: string): string => {
-  const generateSmartMethodsForClass = (className: string): string => {
-    const lowerClassName = className.toLowerCase();
-    let methods = '';
-
-    // Service layer methods
-    if (lowerClassName.includes('service')) {
-      methods += `
-    public String processRequest(String request) {
-        System.out.println("${className}Stub processing request: " + request);
-        return "PROCESSED_" + request;
-    }
-    
-    public boolean isAvailable() {
-        System.out.println("${className}Stub.isAvailable() called");
-        return true;
-    }
-    
-    public Object execute(Object data) {
-        System.out.println("${className}Stub.execute() called with: " + data);
-        return "EXECUTED_SUCCESS";
-    }`;
-    }
-
-    // Data Access Object methods
-    if (lowerClassName.includes('dao') || lowerClassName.includes('repository')) {
-      methods += `
-    public Object save(Object entity) {
-        System.out.println("${className}Stub saving entity: " + entity);
-        return entity;
-    }
-    
-    public Object findById(String id) {
-        System.out.println("${className}Stub finding by id: " + id);
-        return new Object(); // Mock entity with id: " + id
-    }
-    
-    public boolean delete(String id) {
-        System.out.println("${className}Stub deleting id: " + id);
-        return true;
-    }
-    
-    public java.util.List<Object> findAll() {
-        System.out.println("${className}Stub.findAll() called");
-        return new java.util.ArrayList<>();
-    }`;
-    }
-
-    // Controller methods
-    if (lowerClassName.includes('controller')) {
-      methods += `
-    public String handleRequest(String action, Object data) {
-        System.out.println("${className}Stub handling request: " + action + " with data: " + data);
-        return "SUCCESS";
-    }
-    
-    public Object processAction(String actionType) {
-        System.out.println("${className}Stub processing action: " + actionType);
-        return "ACTION_COMPLETED";
-    }`;
-    }
-
-    // Manager/Handler methods
-    if (lowerClassName.includes('manager') || lowerClassName.includes('handler')) {
-      methods += `
-    public void execute() {
-        System.out.println("${className}Stub.execute() called");
-    }
-    
-    public String getStatus() {
-        System.out.println("${className}Stub.getStatus() called");
-        return "READY";
-    }
-    
-    public boolean initialize() {
-        System.out.println("${className}Stub.initialize() called");
-        return true;
-    }`;
-    }
-
-    // Utility class methods
-    if (lowerClassName.includes('util') || lowerClassName.includes('helper')) {
-      methods += `
-    public static String format(Object value) {
-        System.out.println("${className}Stub.format() called with: " + value);
-        return String.valueOf(value);
-    }
-    
-    public static boolean validate(Object input) {
-        System.out.println("${className}Stub.validate() called with: " + input);
-        return true;
-    }`;
-    }
-
-    // Factory methods
-    if (lowerClassName.includes('factory')) {
-      methods += `
-    public Object create(String type) {
-        System.out.println("${className}Stub.create() called for type: " + type);
-        return new Object(); // Mock object of type: " + type
-    }
-    
-    public Object getInstance() {
-        System.out.println("${className}Stub.getInstance() called");
-        return new Object();
-    }`;
-    }
-
-    return methods;
-  };
-
   return `/**
  * Basic Stub for ${className}
  * Generated on ${new Date().toISOString()}
@@ -1422,7 +1166,7 @@ public class ${className}Stub {
     }
     
     // Add commonly expected methods based on class name
-    ${generateSmartMethodsForClass(className)}
+    ${generateCommonMethodsForClass(className)}
     
     // Generic method to handle any calls
     public Object handleCall(String methodName, Object... args) {
@@ -1477,3 +1221,61 @@ public class ${driverClassName}Driver {
     }
 }
 `;
+};
+
+// Helper function to generate common methods based on class name patterns
+const generateCommonMethodsForClass = (className: string): string => {
+  const lowerClassName = className.toLowerCase();
+  let methods = '';
+
+  if (lowerClassName.includes('service')) {
+    methods += `
+    public String processRequest(String request) {
+        System.out.println("${className}Stub processing request: " + request);
+        return "processed_" + request;
+    }
+    
+    public boolean isAvailable() {
+        return true;
+    }`;
+  }
+
+  if (lowerClassName.includes('dao') || lowerClassName.includes('repository')) {
+    methods += `
+    public Object save(Object entity) {
+        System.out.println("${className}Stub saving entity");
+        return entity;
+    }
+    
+    public Object findById(String id) {
+        System.out.println("${className}Stub finding by id: " + id);
+        return new Object(); // Mock entity
+    }
+    
+    public boolean delete(String id) {
+        System.out.println("${className}Stub deleting id: " + id);
+        return true;
+    }`;
+  }
+
+  if (lowerClassName.includes('controller')) {
+    methods += `
+    public String handleRequest(String action, Object data) {
+        System.out.println("${className}Stub handling request: " + action);
+        return "success";
+    }`;
+  }
+
+  if (lowerClassName.includes('manager') || lowerClassName.includes('handler')) {
+    methods += `
+    public void execute() {
+        System.out.println("${className}Stub executing");
+    }
+    
+    public String getStatus() {
+        return "ready";
+    }`;
+  }
+
+  return methods;
+};
