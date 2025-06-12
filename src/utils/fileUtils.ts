@@ -200,8 +200,7 @@ function findBestColumnMatch(headers: string[], possibleNames: string[]): number
   return -1;
 }
 
-// Process uploaded Sequence Diagram file
-// Enhanced processSequenceDiagramFile function with ref box support
+// Enhanced processSequenceDiagramFile function with improved REF box support
 export const processSequenceDiagramFile = async (file: File): Promise<SequenceDiagram | null> => {
   try {
     const content = await readFileAsText(file);
@@ -260,7 +259,7 @@ export const processSequenceDiagramFile = async (file: File): Promise<SequenceDi
 
     // Extract objects from diagram shapes and map to model data
     const objects: ObjectNode[] = [];
-    const objectIdMap = new Map<string, string>(); // modelId -> objectNodeId
+    const objectIdMap = new Map<string, string>();
 
     const shapes = diagram.getElementsByTagName('Shapes')[0];
     if (shapes) {
@@ -317,12 +316,14 @@ export const processSequenceDiagramFile = async (file: File): Promise<SequenceDi
         }
       }
 
-      // Process InteractionOccurrence (REF objects) - ENHANCED
+      // Enhanced processing of InteractionOccurrence (REF objects)
       const occurrences = shapes.getElementsByTagName('InteractionOccurrence');
       for (let i = 0; i < occurrences.length; i++) {
         const occurrence = occurrences[i];
         const refName = occurrence.getAttribute('Name') || `Ref${i}`;
         const modelId = occurrence.getAttribute('Model');
+
+        console.log(`Found InteractionOccurrence: ${refName} with model ID: ${modelId}`);
 
         if (modelId) {
           const objectNodeId = generateId();
@@ -332,7 +333,7 @@ export const processSequenceDiagramFile = async (file: File): Promise<SequenceDi
             type: 'REF'
           });
           objectIdMap.set(modelId, objectNodeId);
-          console.log(`Added reference: ${refName}`);
+          console.log(`Added reference object: ${refName}`);
         }
       }
     }
@@ -392,7 +393,7 @@ export const processSequenceDiagramFile = async (file: File): Promise<SequenceDi
       }
     }
 
-    // ENHANCED: Extract references with better ref box detection
+    // Enhanced extraction of references with better REF box detection
     const references: Reference[] = [];
 
     // Look for InteractionOccurrence models in the frame that reference other diagrams
@@ -402,7 +403,9 @@ export const processSequenceDiagramFile = async (file: File): Promise<SequenceDi
       const refId = occurrenceModel.getAttribute('Id') || generateId();
       const refName = occurrenceModel.getAttribute('Name') || `Ref${i}`;
 
-      // Try to extract referenced diagram name from the occurrence
+      console.log(`Processing InteractionOccurrence model: ${refName} (ID: ${refId})`);
+
+      // Enhanced diagram name extraction
       let referencedDiagramName = null;
 
       // Method 1: Check for CoveredInteraction
@@ -411,24 +414,48 @@ export const processSequenceDiagramFile = async (file: File): Promise<SequenceDi
         const interactionRef = coveredInteraction.getElementsByTagName('Interaction')[0];
         if (interactionRef) {
           referencedDiagramName = interactionRef.getAttribute('Name');
+          console.log(`Found reference via CoveredInteraction: ${referencedDiagramName}`);
         }
       }
 
       // Method 2: Check for InteractionReference
-      const interactionRef = occurrenceModel.getElementsByTagName('InteractionReference')[0];
-      if (interactionRef) {
-        referencedDiagramName = interactionRef.getAttribute('Name') ||
-          interactionRef.getAttribute('Idref');
+      if (!referencedDiagramName) {
+        const interactionRef = occurrenceModel.getElementsByTagName('InteractionReference')[0];
+        if (interactionRef) {
+          referencedDiagramName = interactionRef.getAttribute('Name') ||
+            interactionRef.getAttribute('Idref');
+          console.log(`Found reference via InteractionReference: ${referencedDiagramName}`);
+        }
       }
 
-      // Method 3: Parse from the ref name itself if it looks like a diagram reference
+      // Method 3: Enhanced parsing from the ref name itself
       if (!referencedDiagramName && refName) {
         // Common patterns: "ref ProcessDeposit", "ProcessDeposit", "sd ProcessDeposit"
-        const cleanRefName = refName.replace(/^(ref\s+|sd\s+)/i, '').trim();
-        if (cleanRefName && cleanRefName !== refName) {
+        let cleanRefName = refName.replace(/^(ref\s+|sd\s+)/i, '').trim();
+        
+        // If the cleaned name is different and meaningful, use it
+        if (cleanRefName && cleanRefName !== refName && cleanRefName.length > 2) {
           referencedDiagramName = cleanRefName;
-        } else if (refName.includes('ProcessDeposit') || refName.includes('process')) {
+          console.log(`Extracted reference from name: ${referencedDiagramName}`);
+        } else if (refName.toLowerCase().includes('process') || 
+                   refName.toLowerCase().includes('deposit') ||
+                   refName.toLowerCase().includes('transaction')) {
           referencedDiagramName = refName;
+          console.log(`Using full ref name as reference: ${referencedDiagramName}`);
+        }
+      }
+
+      // Method 4: Check XML attributes for diagram references
+      if (!referencedDiagramName) {
+        const attributes = occurrenceModel.attributes;
+        for (let j = 0; j < attributes.length; j++) {
+          const attr = attributes[j];
+          if (attr.name.toLowerCase().includes('interaction') || 
+              attr.name.toLowerCase().includes('reference')) {
+            referencedDiagramName = attr.value;
+            console.log(`Found reference via attribute ${attr.name}: ${referencedDiagramName}`);
+            break;
+          }
         }
       }
 
@@ -891,40 +918,68 @@ export const generateStubCode = (cls: ClassInfo): string => {
   const packageLine = cls.packageName ? `package ${cls.packageName};\n\n` : '';
 
   let code = `${packageLine}/**
- * Stub for ${cls.name}
+ * Enhanced Stub for ${cls.name}
  * Generated on ${new Date().toISOString()}
+ * Features: Console logging and improved return values
  */
 public class ${cls.name}Stub {\n`;
 
-  // Add stub methods - ensure we have methods to generate
+  // Add stub methods with enhanced logging and return values
   if (cls.methods && cls.methods.length > 0) {
     cls.methods.forEach(method => {
       // Generate method signature
       const paramsList = method.parameters.map(p => `${p.type} ${p.name}`).join(', ');
       code += `    ${method.visibility} ${method.returnType} ${method.name}(${paramsList}) {\n`;
-
-      // Generate return statement based on return type with more realistic values
-      if (method.returnType === 'void') {
-        code += '        // Stub implementation\n        System.out.println("Stub method called: ' + method.name + '");\n';
-      } else if (['int', 'Integer'].includes(method.returnType)) {
-        code += '        return 42;\n';
-      } else if (['byte', 'Byte'].includes(method.returnType)) {
-        code += '        return (byte) 1;\n';
-      } else if (['short', 'Short'].includes(method.returnType)) {
-        code += '        return (short) 100;\n';
-      } else if (['long', 'Long'].includes(method.returnType)) {
-        code += '        return 1000L;\n';
-      } else if (['float', 'Float'].includes(method.returnType)) {
-        code += '        return 3.14f;\n';
-      } else if (['double', 'Double'].includes(method.returnType)) {
-        code += '        return 2.718;\n';
-      } else if (['boolean', 'Boolean'].includes(method.returnType)) {
-        code += '        return true;\n';
-      } else if (['char', 'Character'].includes(method.returnType)) {
-        code += "        return 'X';\n";
-      } else if (method.returnType === 'String') {
-        code += `        return "stub_${method.name.toLowerCase()}_result";\n`;
+      
+      // Add console logging
+      const paramNames = method.parameters.map(p => p.name).join(', ');
+      if (paramNames) {
+        code += `        System.out.println("${cls.name}Stub.${method.name}() called with parameters: " + java.util.Arrays.toString(new Object[]{${paramNames}}));\n`;
       } else {
+        code += `        System.out.println("${cls.name}Stub.${method.name}() called");\n`;
+      }
+
+      // Generate enhanced return statement based on return type
+      if (method.returnType === 'void') {
+        code += '        // Stub implementation - no return value\n';
+      } else if (['int', 'Integer'].includes(method.returnType)) {
+        code += '        int result = 42;\n';
+        code += '        System.out.println("Returning: " + result);\n';
+        code += '        return result;\n';
+      } else if (['byte', 'Byte'].includes(method.returnType)) {
+        code += '        byte result = (byte) 1;\n';
+        code += '        System.out.println("Returning: " + result);\n';
+        code += '        return result;\n';
+      } else if (['short', 'Short'].includes(method.returnType)) {
+        code += '        short result = (short) 100;\n';
+        code += '        System.out.println("Returning: " + result);\n';
+        code += '        return result;\n';
+      } else if (['long', 'Long'].includes(method.returnType)) {
+        code += '        long result = 1000L;\n';
+        code += '        System.out.println("Returning: " + result);\n';
+        code += '        return result;\n';
+      } else if (['float', 'Float'].includes(method.returnType)) {
+        code += '        float result = 3.14f;\n';
+        code += '        System.out.println("Returning: " + result);\n';
+        code += '        return result;\n';
+      } else if (['double', 'Double'].includes(method.returnType)) {
+        code += '        double result = 2.718;\n';
+        code += '        System.out.println("Returning: " + result);\n';
+        code += '        return result;\n';
+      } else if (['boolean', 'Boolean'].includes(method.returnType)) {
+        code += '        boolean result = true;\n';
+        code += '        System.out.println("Returning: " + result);\n';
+        code += '        return result;\n';
+      } else if (['char', 'Character'].includes(method.returnType)) {
+        code += "        char result = 'X';\n";
+        code += '        System.out.println("Returning: " + result);\n';
+        code += '        return result;\n';
+      } else if (method.returnType === 'String') {
+        code += `        String result = "stub_${method.name.toLowerCase()}_result";\n`;
+        code += '        System.out.println("Returning: " + result);\n';
+        code += '        return result;\n';
+      } else {
+        code += '        System.out.println("Returning: null (TODO: Return appropriate stub object)");\n';
         code += '        return null; // TODO: Return appropriate stub object\n';
       }
 
@@ -933,7 +988,7 @@ public class ${cls.name}Stub {\n`;
   } else {
     // Add a default constructor if no methods are found
     code += `    public ${cls.name}Stub() {\n`;
-    code += '        // Default stub constructor\n';
+    code += `        System.out.println("${cls.name}Stub constructor called");\n`;
     code += '    }\n\n';
   }
 
@@ -1054,7 +1109,7 @@ public class ${cls.name}Driver {\n
     code += `    @Test\n    public void testDefaultConstructor() {\n`;
     code += `        // Test that the object can be created\n`;
     code += `        assertNotNull(testObject);\n`;
-    code += `        System.out.println("${cls.name} object created successfully");\n`;
+    code += `        System.out.println("${cls.name}Driver successfully created ${cls.name} object");\n`;
     code += '    }\n\n';
   }
 
@@ -1188,4 +1243,3 @@ public class ${driverClassName}Driver {
     }
 }
 `;
-};
