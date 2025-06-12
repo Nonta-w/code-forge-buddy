@@ -219,14 +219,15 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     });
   };
 
-  // Enhanced generateCode function with improved REF box support
+  // Generate code
+  // Enhanced generateCode function with ref box support
   const generateCode = () => {
     try {
       setIsGenerating(true);
 
       const selectedClasses = allClasses.filter(cls => selectedClassIds.includes(cls.id));
       const newGeneratedCodes: GeneratedCode[] = [];
-      const generatedFileNames = new Set<string>();
+      const generatedFileNames = new Set<string>(); // Track generated file names to prevent duplicates
 
       // Create a map of class names to class objects for quick lookup
       const classMap = new Map<string, ClassInfo>();
@@ -236,23 +237,12 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
 
       // Find which classes need stubs and drivers based on interaction with selected classes
       const selectedClassNames = new Set(selectedClasses.map(cls => cls.name));
-      const callGraph = new Map<string, Set<string>>();
-
-      // Create a map of diagram names to diagrams for quick lookup with fuzzy matching
-      const diagramMap = new Map<string, SequenceDiagram>();
-      sequenceDiagrams.forEach(diagram => {
-        diagramMap.set(diagram.name, diagram);
-        // Add normalized versions for better matching
-        const normalized = diagram.name.toLowerCase().replace(/[_\s-]+/g, '');
-        diagramMap.set(normalized, diagram);
-      });
-
-      console.log('Available diagrams for REF matching:', Array.from(diagramMap.keys()));
+      const callGraph = new Map<string, Set<string>>(); // caller -> called classes
 
       // Helper function to process a diagram and its references recursively
       const processSequenceDiagramRecursively = (diagram: SequenceDiagram, visited: Set<string> = new Set()) => {
+        // Prevent infinite recursion
         if (visited.has(diagram.name)) {
-          console.log(`Already visited diagram: ${diagram.name}, skipping to prevent cycles`);
           return;
         }
         visited.add(diagram.name);
@@ -261,23 +251,30 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
 
         // Process messages in current diagram
         diagram.messages.forEach(message => {
+          console.log(`Processing message: ${message.name}, type: ${message.type}, from->to: ${message.from}->${message.to}`);
+
           const fromObj = diagram.objects.find(obj => obj.id === message.from);
           const toObj = diagram.objects.find(obj => obj.id === message.to);
 
           if (fromObj && toObj && fromObj.type && toObj.type) {
+            console.log(`Message: ${fromObj.type} -> ${toObj.type} (${message.name})`);
+
             // Skip return messages, self-calls, and certain system messages
             if (message.name && (
               message.name.toLowerCase().includes('return') ||
               message.name.toLowerCase().includes('response') ||
+              message.name.toLowerCase().includes('transaction') ||
               message.type === 'return' ||
-              fromObj.type === toObj.type
+              fromObj.type === toObj.type // Skip self-calls
             )) {
+              console.log(`Skipping message: ${message.name} (${fromObj.type} -> ${toObj.type})`);
               return;
             }
 
             // Skip messages to/from actors and refs
             if (fromObj.type === 'ACTOR' || toObj.type === 'ACTOR' ||
-                fromObj.type === 'REF' || toObj.type === 'REF') {
+              fromObj.type === 'REF' || toObj.type === 'REF') {
+              console.log(`Skipping actor/ref message: ${message.name}`);
               return;
             }
 
@@ -290,58 +287,36 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
           }
         });
 
-        // Enhanced processing of references to other diagrams
+        // Process references to other diagrams - ENHANCED
         diagram.references.forEach(ref => {
           console.log(`Processing reference: ${ref.name} -> ${ref.diagramName}`);
 
           if (ref.diagramName) {
-            let refDiagram = diagramMap.get(ref.diagramName);
+            // Find the referenced diagram
+            let refDiagram = sequenceDiagrams.find(d => d.name === ref.diagramName);
 
-            // Enhanced fuzzy matching for diagram names
+            // Try fuzzy matching if exact match not found
             if (!refDiagram) {
-              console.log(`Direct match not found for ${ref.diagramName}, trying fuzzy matching...`);
-              
-              // Try case-insensitive match
-              const lowerRefName = ref.diagramName.toLowerCase();
-              for (const [diagName, diag] of diagramMap.entries()) {
-                if (diagName.toLowerCase() === lowerRefName) {
-                  refDiagram = diag;
-                  console.log(`Found case-insensitive match: ${diagName}`);
-                  break;
-                }
-              }
+              refDiagram = sequenceDiagrams.find(d =>
+                d.name.toLowerCase().includes(ref.diagramName.toLowerCase()) ||
+                ref.diagramName.toLowerCase().includes(d.name.toLowerCase())
+              );
+            }
 
-              // Try partial matching
-              if (!refDiagram) {
-                for (const [diagName, diag] of diagramMap.entries()) {
-                  if (diagName.includes(ref.diagramName) || ref.diagramName.includes(diagName)) {
-                    refDiagram = diag;
-                    console.log(`Found partial match: ${diagName} for ${ref.diagramName}`);
-                    break;
-                  }
-                }
-              }
+            // Try normalized matching
+            if (!refDiagram) {
+              const normalizedRefName = ref.diagramName.toLowerCase()
+                .replace(/^(ref\s+|sd\s+)/i, '')
+                .replace(/[_\s-]+/g, '')
+                .trim();
 
-              // Try normalized matching (remove spaces, underscores, etc.)
-              if (!refDiagram) {
-                const normalizedRefName = ref.diagramName.toLowerCase()
-                  .replace(/^(ref\s+|sd\s+)/i, '')
+              refDiagram = sequenceDiagrams.find(d => {
+                const normalizedDiagName = d.name.toLowerCase()
                   .replace(/[_\s-]+/g, '')
                   .trim();
-
-                for (const [diagName, diag] of diagramMap.entries()) {
-                  const normalizedDiagName = diagName.toLowerCase()
-                    .replace(/[_\s-]+/g, '')
-                    .trim();
-                  
-                  if (normalizedDiagName.includes(normalizedRefName) ||
-                      normalizedRefName.includes(normalizedDiagName)) {
-                    refDiagram = diag;
-                    console.log(`Found normalized match: ${diagName} for ${ref.diagramName}`);
-                    break;
-                  }
-                }
-              }
+                return normalizedDiagName.includes(normalizedRefName) ||
+                  normalizedRefName.includes(normalizedDiagName);
+              });
             }
 
             if (refDiagram) {
@@ -392,6 +367,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
               }
             } else {
               console.log(`Class ${calledClassName} not found in class map, creating basic stub`);
+              // Create a basic stub even if we don't have the class definition
               const stubFileName = `${calledClassName}Stub.java`;
               if (!generatedFileNames.has(stubFileName)) {
                 const basicStubCode = generateBasicStubCode(calledClassName);
@@ -418,6 +394,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
             if (!selectedClassNames.has(callerClassName)) {
               const driverFileName = `${callerClassName}Driver.java`;
               if (!generatedFileNames.has(driverFileName)) {
+                // Find the caller class info to generate proper driver
                 const callerClass = classMap.get(callerClassName);
                 if (callerClass) {
                   const driverCode = generateDriverCode(callerClass);
@@ -433,6 +410,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
                   console.log(`Generated driver for ${callerClassName} (to call ${classUnderTest.name})`);
                 } else {
                   console.log(`Class ${callerClassName} not found in class map, creating basic driver`);
+                  // Create a basic driver even if we don't have the class definition
                   const basicDriverCode = generateBasicDriverCode(callerClassName, classUnderTest.name);
                   newGeneratedCodes.push({
                     id: generateId(),
@@ -453,9 +431,11 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
 
       // Check if any stubs or drivers were generated
       if (newGeneratedCodes.length === 0) {
+        // No stubs or drivers needed - inform the user
         const selectedClassNames = selectedClasses.map(cls => cls.name).join(', ');
-        toast.success(`No stubs or drivers needed for ${selectedClassNames}. The selected classes can be tested independently.`);
+        toast.success(`No stubs or drivers needed for ${selectedClassNames}. The selected classes can be tested independently without additional test infrastructure.`);
 
+        // Create a summary file explaining why no files were generated
         const summaryContent = `Test Analysis Summary
 Generated on: ${new Date().toISOString()}
 
@@ -464,7 +444,10 @@ Selected Classes for Testing: ${selectedClassNames}
 Analysis Results:
 - No external callers found that require drivers
 - No dependencies found that require stubs
-- The selected classes appear to be self-contained
+- The selected classes appear to be self-contained or only use standard library classes
+
+Recommendation:
+The selected classes can be tested directly using standard unit testing frameworks (JUnit, TestNG, etc.) without additional stub or driver infrastructure.
 
 Call Graph Analysis:
 ${Array.from(callGraph.entries()).map(([caller, called]) =>
@@ -496,9 +479,10 @@ ${Array.from(callGraph.entries()).map(([caller, called]) =>
 
       setGeneratedCodes(prev => [...prev, ...newGeneratedCodes]);
       setCodeSessions(prev => [...prev, newSession]);
-      setCurrentStep(4);
+      setCurrentStep(4); // Move to code view
 
       const fileCount = newGeneratedCodes.filter(code => code.fileName !== 'TestAnalysisSummary.txt').length;
+
       if (fileCount > 0) {
         toast.success(`Generated ${fileCount} code files for testing: ${sessionName}`);
       }
@@ -558,15 +542,21 @@ public class ${driverClassName}Driver {
     public void testBasicInteraction() {
         setUp();
         
+        // Basic test to verify the target object can be created and interacted with
         assertNotNull(targetObject);
         System.out.println("${driverClassName}Driver successfully created ${targetClassName} object");
+        
+        // TODO: Add specific test methods based on your requirements
+        // This driver was generated because ${driverClassName} calls ${targetClassName}
     }
     
     @Test
     public void testDriverFunctionality() {
         setUp();
         
+        // Test that demonstrates ${driverClassName} can drive ${targetClassName}
         try {
+            // TODO: Implement specific driver logic here
             System.out.println("Driver test completed successfully");
         } catch (Exception e) {
             fail("Driver test failed: " + e.getMessage());
@@ -589,7 +579,6 @@ public class ${driverClassName}Driver {
     }
     
     public boolean isAvailable() {
-        System.out.println("${className}Stub.isAvailable() called");
         return true;
     }`;
     }
@@ -603,7 +592,7 @@ public class ${driverClassName}Driver {
     
     public Object findById(String id) {
         System.out.println("${className}Stub finding by id: " + id);
-        return new Object();
+        return new Object(); // Mock entity
     }
     
     public boolean delete(String id) {
@@ -627,7 +616,6 @@ public class ${driverClassName}Driver {
     }
     
     public String getStatus() {
-        System.out.println("${className}Stub.getStatus() called");
         return "ready";
     }`;
     }
