@@ -44,30 +44,30 @@ interface AppContextType {
   addFile: (file: File, type: FileType) => Promise<void>;
   removeFile: (id: string) => void;
   resetAll: () => void;
-  
+
   // RTM and Functions
   systemFunctions: SystemFunction[];
   selectedFunctionId: string | null;
   setSelectedFunctionId: (id: string | null) => void;
-  
+
   // Classes
   allClasses: ClassInfo[];
   filteredClasses: ClassInfo[];
   selectedClassIds: string[];
   toggleClassSelection: (id: string) => void;
-  
+
   // Sequence Diagrams
   sequenceDiagrams: SequenceDiagram[];
-  
+
   // Code Generation
   generatedCodes: GeneratedCode[];
   codeSessions: CodeGenerationSession[];
   generateCode: () => void;
-  
+
   // UI State
   currentStep: number;
   setCurrentStep: (step: number) => void;
-  
+
   // Status flags
   isLoading: boolean;
   isGenerating: boolean;
@@ -81,14 +81,14 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     const saved = localStorage.getItem(STORAGE_KEYS.UPLOADED_FILES);
     return saved ? JSON.parse(saved) : [];
   });
-  
+
   // RTM state
   const [systemFunctions, setSystemFunctions] = useState<SystemFunction[]>(() => {
     const saved = localStorage.getItem(STORAGE_KEYS.SYSTEM_FUNCTIONS);
     return saved ? JSON.parse(saved) : [];
   });
   const [selectedFunctionId, setSelectedFunctionId] = useState<string | null>(null);
-  
+
   // Classes state
   const [allClasses, setAllClasses] = useState<ClassInfo[]>(() => {
     const saved = localStorage.getItem(STORAGE_KEYS.ALL_CLASSES);
@@ -98,13 +98,13 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
   });
   const [filteredClasses, setFilteredClasses] = useState<ClassInfo[]>([]);
   const [selectedClassIds, setSelectedClassIds] = useState<string[]>([]);
-  
+
   // Sequence Diagrams state
   const [sequenceDiagrams, setSequenceDiagrams] = useState<SequenceDiagram[]>(() => {
     const saved = localStorage.getItem(STORAGE_KEYS.SEQUENCE_DIAGRAMS);
     return saved ? JSON.parse(saved) : [];
   });
-  
+
   // Generated Code state
   const [generatedCodes, setGeneratedCodes] = useState<GeneratedCode[]>(() => {
     const saved = localStorage.getItem(STORAGE_KEYS.GENERATED_CODES);
@@ -116,22 +116,22 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     const saved = localStorage.getItem(STORAGE_KEYS.CODE_SESSIONS);
     return saved ? JSON.parse(saved) : [];
   });
-  
+
   // UI state - Load the current step from localStorage or default to 1
   const [currentStep, setCurrentStep] = useState<number>(() => {
     const saved = localStorage.getItem(STORAGE_KEYS.CURRENT_STEP);
     return saved ? parseInt(saved, 10) : 1;
   });
-  
+
   // Status flags
   const [isLoading, setIsLoading] = useState<boolean>(false);
   const [isGenerating, setIsGenerating] = useState<boolean>(false);
-  
+
   // Add file
   const addFile = async (file: File, type: FileType) => {
     try {
       setIsLoading(true);
-      
+
       // Read file content
       const reader = new FileReader();
       const content = await new Promise<string>((resolve, reject) => {
@@ -139,7 +139,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
         reader.onerror = () => reject(reader.error);
         reader.readAsText(file);
       });
-      
+
       // Create uploaded file object
       const uploadedFile: UploadedFile = {
         id: generateId(),
@@ -150,7 +150,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
         content,
         timestamp: new Date()
       };
-      
+
       // Process file based on type
       if (type === 'rtm') {
         const functions = await processRTMFile(file);
@@ -176,7 +176,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
           console.log('No classes extracted from class diagram');
         }
       }
-      
+
       // Update uploaded files
       setUploadedFiles(prev => [...prev, uploadedFile]);
       toast.success(`File ${file.name} uploaded successfully`);
@@ -187,12 +187,12 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
       setIsLoading(false);
     }
   };
-  
+
   // Remove file
   const removeFile = (id: string) => {
     const fileToRemove = uploadedFiles.find(f => f.id === id);
     if (!fileToRemove) return;
-    
+
     // Remove file and related data
     if (fileToRemove.type === 'rtm') {
       setSystemFunctions([]);
@@ -203,11 +203,11 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
       setAllClasses([]);
       setFilteredClasses([]);
     }
-    
+
     setUploadedFiles(prev => prev.filter(f => f.id !== id));
     toast.success(`File ${fileToRemove.name} removed`);
   };
-  
+
   // Toggle class selection
   const toggleClassSelection = (id: string) => {
     setSelectedClassIds(prev => {
@@ -218,49 +218,68 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
       }
     });
   };
-  
+
   // Generate code
   const generateCode = () => {
     try {
       setIsGenerating(true);
-      
+
       const selectedClasses = allClasses.filter(cls => selectedClassIds.includes(cls.id));
       const newGeneratedCodes: GeneratedCode[] = [];
       const generatedFileNames = new Set<string>(); // Track generated file names to prevent duplicates
-      
+
       // Create a map of class names to class objects for quick lookup
       const classMap = new Map<string, ClassInfo>();
       allClasses.forEach(cls => {
         classMap.set(cls.name, cls);
       });
-      
+
       // Find which classes need stubs and drivers based on interaction with selected classes
       const selectedClassNames = new Set(selectedClasses.map(cls => cls.name));
       const callGraph = new Map<string, Set<string>>(); // caller -> called classes
-      
+
+      // Build call graph from sequence diagrams
       // Build call graph from sequence diagrams
       sequenceDiagrams.forEach(diagram => {
+        console.log(`Processing diagram: ${diagram.name}`);
         diagram.messages.forEach(message => {
+          console.log(`Processing message: ${message.name}, type: ${message.type}, from->to: ${message.from}->${message.to}`);
+
           const fromObj = diagram.objects.find(obj => obj.id === message.from);
           const toObj = diagram.objects.find(obj => obj.id === message.to);
-          
+
           if (fromObj && toObj && fromObj.type && toObj.type) {
+            console.log(`Message: ${fromObj.type} -> ${toObj.type} (${message.name})`);
+
+            // Skip return messages and self-calls
+            if (message.name && (
+              message.name.toLowerCase().includes('return') ||
+              message.name.toLowerCase().includes('response') ||
+              message.name.toLowerCase().includes('transaction') || // Add this line
+              message.type === 'return' ||
+              fromObj.type === toObj.type // Skip self-calls
+            )) {
+              console.log(`Skipping message: ${message.name} (${fromObj.type} -> ${toObj.type})`);
+              return;
+            }
+
             // Record that fromObj.type calls toObj.type
             if (!callGraph.has(fromObj.type)) {
               callGraph.set(fromObj.type, new Set<string>());
             }
             callGraph.get(fromObj.type)?.add(toObj.type);
+            console.log(`Added to call graph: ${fromObj.type} calls ${toObj.type}`);
           }
         });
       });
-      
+
       console.log('Call graph:', callGraph);
       console.log('Selected classes for testing:', selectedClassNames);
-      
+
       // For each selected class (class under test), generate needed stubs and drivers
       selectedClasses.forEach(classUnderTest => {
         console.log(`Generating stubs and drivers for class under test: ${classUnderTest.name}`);
-        
+
         // 1. Generate STUBS for classes that are CALLED BY the class under test
         const calledClasses = callGraph.get(classUnderTest.name) || new Set<string>();
         calledClasses.forEach(calledClassName => {
@@ -285,50 +304,92 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
             }
           }
         });
-        
+
         // 2. Generate DRIVERS for classes that CALL the class under test
         callGraph.forEach((calledClasses, callerClassName) => {
           if (calledClasses.has(classUnderTest.name)) {
             // This caller class calls our class under test
             // Only create driver if the caller is not also under test
             if (!selectedClassNames.has(callerClassName)) {
-              const driverFileName = `${classUnderTest.name}Driver.java`;
+              const driverFileName = `${callerClassName}Driver.java`; // FIXED: Generate driver for the CALLER
               if (!generatedFileNames.has(driverFileName)) {
-                const driverCode = generateDriverCode(classUnderTest);
-                newGeneratedCodes.push({
-                  id: generateId(),
-                  fileName: driverFileName,
-                  fileContent: driverCode,
-                  type: 'driver',
-                  timestamp: new Date(),
-                  relatedClass: classUnderTest.name
-                });
-                generatedFileNames.add(driverFileName);
-                console.log(`Generated driver for ${classUnderTest.name} (called by ${callerClassName})`);
+                // Find the caller class info to generate proper driver
+                const callerClass = classMap.get(callerClassName);
+                if (callerClass) {
+                  const driverCode = generateDriverCode(callerClass); // FIXED: Generate driver for CALLER class
+                  newGeneratedCodes.push({
+                    id: generateId(),
+                    fileName: driverFileName,
+                    fileContent: driverCode,
+                    type: 'driver',
+                    timestamp: new Date(),
+                    relatedClass: callerClassName // FIXED: Driver is for the CALLER
+                  });
+                  generatedFileNames.add(driverFileName);
+                  console.log(`Generated driver for ${callerClassName} (to call ${classUnderTest.name})`);
+                }
               }
             }
           }
         });
       });
-      
+
       // If no stubs or drivers were generated, create at least a basic driver for each selected class
+      // if (newGeneratedCodes.length === 0) {
+      //   selectedClasses.forEach(selectedClass => {
+      //     const driverFileName = `${selectedClass.name}Driver.java`;
+      //     if (!generatedFileNames.has(driverFileName)) {
+      //       const driverCode = generateDriverCode(selectedClass);
+      //       newGeneratedCodes.push({
+      //         id: generateId(),
+      //         fileName: driverFileName,
+      //         fileContent: driverCode,
+      //         type: 'driver',
+      //         timestamp: new Date(),
+      //         relatedClass: selectedClass.name
+      //       });
+      //       generatedFileNames.add(driverFileName);
+      //       console.log(`Generated default driver for ${selectedClass.name}`);
+      //     }
+      //   });
+      // }
+      // Check if any stubs or drivers were generated
       if (newGeneratedCodes.length === 0) {
-        selectedClasses.forEach(selectedClass => {
-          const driverFileName = `${selectedClass.name}Driver.java`;
-          if (!generatedFileNames.has(driverFileName)) {
-            const driverCode = generateDriverCode(selectedClass);
-            newGeneratedCodes.push({
-              id: generateId(),
-              fileName: driverFileName,
-              fileContent: driverCode,
-              type: 'driver',
-              timestamp: new Date(),
-              relatedClass: selectedClass.name
-            });
-            generatedFileNames.add(driverFileName);
-            console.log(`Generated default driver for ${selectedClass.name}`);
-          }
-        });
+        // No stubs or drivers needed - inform the user
+        const selectedClassNames = selectedClasses.map(cls => cls.name).join(', ');
+        toast.success(`No stubs or drivers needed for ${selectedClassNames}. The selected classes can be tested independently without additional test infrastructure.`);
+
+        // Optional: Create a summary file explaining why no files were generated
+        const summaryContent = `Test Analysis Summary
+      Generated on: ${new Date().toISOString()}
+
+      Selected Classes for Testing: ${selectedClassNames}
+
+      Analysis Results:
+      - No external callers found that require drivers
+      - No dependencies found that require stubs
+      - The selected classes appear to be self-contained or only use standard library classes
+
+      Recommendation:
+      The selected classes can be tested directly using standard unit testing frameworks (JUnit, TestNG, etc.) without additional stub or driver infrastructure.
+      `;
+
+        const summaryCode: GeneratedCode = {
+          id: generateId(),
+          fileName: 'TestAnalysisSummary.txt',
+          fileContent: summaryContent,
+          type: 'driver', // or create a new type 'summary'
+          timestamp: new Date(),
+          relatedClass: 'Analysis'
+        };
+
+        newGeneratedCodes.push(summaryCode);
+        setCurrentStep(4); // Still move to code view to show the summary
+      } else {
+        // Normal success message when files are generated
+        const sessionName = selectedClasses.map(cls => cls.name).join(', ');
+        toast.success(`Generated ${newGeneratedCodes.length} code files for testing: ${sessionName}`);
+        setCurrentStep(4);
       }
 
       // Create new session
@@ -340,7 +401,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
         codes: newGeneratedCodes,
         timestamp: new Date()
       };
-      
+
       setGeneratedCodes(prev => [...prev, ...newGeneratedCodes]);
       setCodeSessions(prev => [...prev, newSession]);
       setCurrentStep(4); // Move to code view
@@ -352,7 +413,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
       setIsGenerating(false);
     }
   };
-  
+
   // Reset all state
   const resetAll = () => {
     setUploadedFiles([]);
@@ -368,37 +429,37 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     setIsLoading(false);
     setIsGenerating(false);
   };
-  
+
   // Update filtered classes when selected function changes (remove auto step progression)
   useEffect(() => {
     if (selectedFunctionId) {
       console.log('=== Filtering classes for function ===');
       console.log('Selected function ID:', selectedFunctionId);
       console.log('All classes:', allClasses.map(c => ({ name: c.name, relatedFunctions: c.relatedFunctions })));
-      
+
       // Filter classes related to the selected function
       const filtered = allClasses.filter(
         cls => cls.relatedFunctions.includes(selectedFunctionId)
       );
-      
+
       console.log('Filtered classes:', filtered.map(c => c.name));
       setFilteredClasses(filtered);
       // Clear selected class ids
       setSelectedClassIds([]);
-      
+
       // Don't automatically move to step 3 - let user click button
     } else {
       setFilteredClasses([]);
     }
   }, [selectedFunctionId, allClasses]);
-  
+
   // Update class relationships when all required data is available
   useEffect(() => {
     console.log('=== Checking for mapping update ===');
     console.log('System functions:', systemFunctions.length);
     console.log('All classes:', allClasses.length);
     console.log('Sequence diagrams:', sequenceDiagrams.length);
-    
+
     if (
       systemFunctions.length > 0 &&
       allClasses.length > 0 &&
@@ -415,25 +476,25 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
       setAllClasses(updatedClasses);
     }
   }, [systemFunctions, sequenceDiagrams, allClasses.length]); // Changed: added allClasses.length as dependency
-  
+
   // Save to localStorage whenever state changes
   useEffect(() => {
     localStorage.setItem(STORAGE_KEYS.UPLOADED_FILES, JSON.stringify(uploadedFiles));
   }, [uploadedFiles]);
-  
+
   useEffect(() => {
     localStorage.setItem(STORAGE_KEYS.SYSTEM_FUNCTIONS, JSON.stringify(systemFunctions));
   }, [systemFunctions]);
-  
+
   useEffect(() => {
     console.log('Saving classes to localStorage:', allClasses.length);
     localStorage.setItem(STORAGE_KEYS.ALL_CLASSES, JSON.stringify(allClasses));
   }, [allClasses]);
-  
+
   useEffect(() => {
     localStorage.setItem(STORAGE_KEYS.SEQUENCE_DIAGRAMS, JSON.stringify(sequenceDiagrams));
   }, [sequenceDiagrams]);
-  
+
   useEffect(() => {
     localStorage.setItem(STORAGE_KEYS.GENERATED_CODES, JSON.stringify(generatedCodes));
   }, [generatedCodes]);
@@ -441,12 +502,12 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
   useEffect(() => {
     localStorage.setItem(STORAGE_KEYS.CODE_SESSIONS, JSON.stringify(codeSessions));
   }, [codeSessions]);
-  
+
   // Save current step to localStorage
   useEffect(() => {
     localStorage.setItem(STORAGE_KEYS.CURRENT_STEP, currentStep.toString());
   }, [currentStep]);
-  
+
   const value = {
     uploadedFiles,
     addFile,
@@ -468,7 +529,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     isLoading,
     isGenerating
   };
-  
+
   return <AppContext.Provider value={value}>{children}</AppContext.Provider>;
 }
 
