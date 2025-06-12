@@ -200,7 +200,84 @@ function findBestColumnMatch(headers: string[], possibleNames: string[]): number
   return -1;
 }
 
-// Process uploaded Sequence Diagram file
+// Enhanced REF name matching patterns
+const enhanceRefNameMatching = (refName: string): string[] => {
+  if (!refName) return [];
+  
+  const variations: string[] = [];
+  const cleaned = refName.trim();
+  
+  // Add original name
+  variations.push(cleaned);
+  
+  // Remove common prefixes
+  const withoutPrefixes = cleaned
+    .replace(/^(ref\s+|sd\s+|sequence\s+|diagram\s+)/i, '')
+    .trim();
+  if (withoutPrefixes !== cleaned) {
+    variations.push(withoutPrefixes);
+  }
+  
+  // Handle camelCase to space separated
+  const spacesSeparated = cleaned.replace(/([a-z])([A-Z])/g, '$1 $2');
+  if (spacesSeparated !== cleaned) {
+    variations.push(spacesSeparated);
+  }
+  
+  // Handle underscores and dashes
+  const normalized = cleaned.replace(/[_\-]/g, ' ');
+  if (normalized !== cleaned) {
+    variations.push(normalized);
+  }
+  
+  // Handle common patterns like "ProcessDeposit" -> "Process Deposit"
+  const withSpaces = cleaned.replace(/([a-z])([A-Z])/g, '$1 $2');
+  if (withSpaces !== cleaned) {
+    variations.push(withSpaces);
+  }
+  
+  console.log(`REF name variations for "${refName}":`, variations);
+  return [...new Set(variations)]; // Remove duplicates
+};
+
+// Enhanced diagram matching function
+const findMatchingDiagram = (refName: string, diagrams: Map<string, SequenceDiagram>): SequenceDiagram | null => {
+  const variations = enhanceRefNameMatching(refName);
+  
+  // Try exact matches first
+  for (const variation of variations) {
+    if (diagrams.has(variation)) {
+      console.log(`Found exact match for "${refName}" -> "${variation}"`);
+      return diagrams.get(variation)!;
+    }
+  }
+  
+  // Try case-insensitive matches
+  for (const variation of variations) {
+    for (const [diagName, diagram] of diagrams.entries()) {
+      if (diagName.toLowerCase() === variation.toLowerCase()) {
+        console.log(`Found case-insensitive match for "${refName}" -> "${diagName}"`);
+        return diagram;
+      }
+    }
+  }
+  
+  // Try partial matches
+  for (const variation of variations) {
+    for (const [diagName, diagram] of diagrams.entries()) {
+      if (diagName.toLowerCase().includes(variation.toLowerCase()) || 
+          variation.toLowerCase().includes(diagName.toLowerCase())) {
+        console.log(`Found partial match for "${refName}" -> "${diagName}"`);
+        return diagram;
+      }
+    }
+  }
+  
+  console.log(`No match found for REF: "${refName}"`);
+  return null;
+};
+
+// Process uploaded Sequence Diagram file with enhanced REF processing
 export const processSequenceDiagramFile = async (file: File): Promise<SequenceDiagram | null> => {
   try {
     const content = await readFileAsText(file);
@@ -391,15 +468,19 @@ export const processSequenceDiagramFile = async (file: File): Promise<SequenceDi
       }
     }
 
-    // Extract references with better ref box detection
+    // Enhanced references extraction with better ref box detection
     const references: Reference[] = [];
 
     // Look for InteractionOccurrence models in the frame that reference other diagrams
     const occurrenceModels = frame.getElementsByTagName('InteractionOccurrence');
+    console.log(`Found ${occurrenceModels.length} InteractionOccurrence models for REF processing`);
+
     for (let i = 0; i < occurrenceModels.length; i++) {
       const occurrenceModel = occurrenceModels[i];
       const refId = occurrenceModel.getAttribute('Id') || generateId();
       const refName = occurrenceModel.getAttribute('Name') || `Ref${i}`;
+
+      console.log(`Processing REF occurrence: ${refName} (ID: ${refId})`);
 
       // Try to extract referenced diagram name from the occurrence
       let referencedDiagramName = null;
@@ -410,25 +491,41 @@ export const processSequenceDiagramFile = async (file: File): Promise<SequenceDi
         const interactionRef = coveredInteraction.getElementsByTagName('Interaction')[0];
         if (interactionRef) {
           referencedDiagramName = interactionRef.getAttribute('Name');
+          console.log(`Found referenced diagram via CoveredInteraction: ${referencedDiagramName}`);
         }
       }
 
       // Method 2: Check for InteractionReference
-      const interactionRef = occurrenceModel.getElementsByTagName('InteractionReference')[0];
-      if (interactionRef) {
-        referencedDiagramName = interactionRef.getAttribute('Name') ||
-          interactionRef.getAttribute('Idref');
+      if (!referencedDiagramName) {
+        const interactionRef = occurrenceModel.getElementsByTagName('InteractionReference')[0];
+        if (interactionRef) {
+          referencedDiagramName = interactionRef.getAttribute('Name') ||
+            interactionRef.getAttribute('Idref');
+          console.log(`Found referenced diagram via InteractionReference: ${referencedDiagramName}`);
+        }
       }
 
-      // Method 3: Parse from the ref name itself if it looks like a diagram reference
-      if (!referencedDiagramName && refName) {
-        // Common patterns: "ref ProcessDeposit", "ProcessDeposit", "sd ProcessDeposit"
-        const cleanRefName = refName.replace(/^(ref\s+|sd\s+)/i, '').trim();
-        if (cleanRefName && cleanRefName !== refName) {
-          referencedDiagramName = cleanRefName;
-        } else if (refName.includes('ProcessDeposit') || refName.includes('process')) {
-          referencedDiagramName = refName;
+      // Method 3: Check for Operation references (like in your example)
+      if (!referencedDiagramName) {
+        const transitFrom = occurrenceModel.getElementsByTagName('TransitFrom')[0];
+        if (transitFrom) {
+          const operation = transitFrom.getElementsByTagName('Operation')[0];
+          if (operation) {
+            const operationName = operation.getAttribute('Name');
+            if (operationName) {
+              referencedDiagramName = operationName;
+              console.log(`Found referenced diagram via Operation: ${referencedDiagramName}`);
+            }
+          }
         }
+      }
+
+      // Method 4: Parse from the ref name itself if it looks like a diagram reference
+      if (!referencedDiagramName && refName) {
+        // Enhanced pattern matching for REF names
+        const variations = enhanceRefNameMatching(refName);
+        referencedDiagramName = variations[0]; // Use the first (cleaned) variation
+        console.log(`Using parsed REF name: ${referencedDiagramName}`);
       }
 
       references.push({
@@ -710,13 +807,13 @@ export const processClassDiagramFile = async (file: File): Promise<ClassInfo[] |
   }
 };
 
-// Map functions to classes based on sequence diagrams
+// Enhanced function to class mapping with improved REF processing
 export const mapFunctionsToClasses = (
   functions: SystemFunction[],
   sequenceDiagrams: SequenceDiagram[],
   classes: ClassInfo[]
 ): ClassInfo[] => {
-  console.log('=== Enhanced Function to Class Mapping Debug ===');
+  console.log('=== Enhanced Function to Class Mapping with REF Processing ===');
   console.log('Functions:', functions);
   console.log('Sequence Diagrams:', sequenceDiagrams);
   console.log('Classes:', classes.map(c => ({ name: c.name, id: c.id })));
@@ -731,7 +828,7 @@ export const mapFunctionsToClasses = (
     console.log(`Mapped diagram: ${diagram.name} with ${diagram.objects.length} objects and ${diagram.references.length} references`);
   });
 
-  // Helper function to get all related class names from a diagram (including referenced diagrams)
+  // Enhanced function to get all related class names from a diagram (including referenced diagrams)
   const getRelatedClassNamesFromDiagram = (diagram: SequenceDiagram, visited: Set<string> = new Set()): Set<string> => {
     const relatedClassNames = new Set<string>();
 
@@ -751,59 +848,13 @@ export const mapFunctionsToClasses = (
       }
     });
 
-    // Process references to other diagrams
+    // Enhanced REF processing with better matching
     diagram.references.forEach(ref => {
       console.log(`Processing reference: ${ref.name} -> ${ref.diagramName}`);
 
       if (ref.diagramName) {
-        // Try exact match first
-        let refDiagram = diagramMap.get(ref.diagramName);
-
-        // If not found, try fuzzy matching
-        if (!refDiagram) {
-          console.log(`Exact match not found for ${ref.diagramName}, trying fuzzy matching...`);
-
-          // Try case-insensitive matching
-          for (const [diagName, diag] of diagramMap.entries()) {
-            if (diagName.toLowerCase() === ref.diagramName.toLowerCase()) {
-              refDiagram = diag;
-              console.log(`Found case-insensitive match: ${diagName}`);
-              break;
-            }
-          }
-
-          // Try partial matching
-          if (!refDiagram) {
-            for (const [diagName, diag] of diagramMap.entries()) {
-              if (diagName.includes(ref.diagramName) || ref.diagramName.includes(diagName)) {
-                refDiagram = diag;
-                console.log(`Found partial match: ${diagName} for ${ref.diagramName}`);
-                break;
-              }
-            }
-          }
-
-          // Try matching against common patterns
-          if (!refDiagram) {
-            const normalizedRefName = ref.diagramName.toLowerCase()
-              .replace(/^(ref\s+|sd\s+)/i, '')
-              .replace(/[_\s-]+/g, '')
-              .trim();
-
-            for (const [diagName, diag] of diagramMap.entries()) {
-              const normalizedDiagName = diagName.toLowerCase()
-                .replace(/[_\s-]+/g, '')
-                .trim();
-
-              if (normalizedDiagName.includes(normalizedRefName) ||
-                normalizedRefName.includes(normalizedDiagName)) {
-                refDiagram = diag;
-                console.log(`Found normalized match: ${diagName} for ${ref.diagramName}`);
-                break;
-              }
-            }
-          }
-        }
+        // Use enhanced diagram matching
+        const refDiagram = findMatchingDiagram(ref.diagramName, diagramMap);
 
         if (refDiagram) {
           console.log(`Found referenced diagram: ${refDiagram.name}`);
@@ -845,17 +896,12 @@ export const mapFunctionsToClasses = (
         classNamesFromDiagram.forEach(className => allRelatedClassNames.add(className));
       } else {
         console.log(`Diagram not found: ${diagramName}`);
-        // Try to find diagram with partial name matching
-        const possibleDiagrams = sequenceDiagrams.filter(d =>
-          d.name.toLowerCase().includes(diagramName.toLowerCase()) ||
-          diagramName.toLowerCase().includes(d.name.toLowerCase())
-        );
-        if (possibleDiagrams.length > 0) {
-          console.log(`Found possible matches:`, possibleDiagrams.map(d => d.name));
-          possibleDiagrams.forEach(diagram => {
-            const classNamesFromDiagram = getRelatedClassNamesFromDiagram(diagram);
-            classNamesFromDiagram.forEach(className => allRelatedClassNames.add(className));
-          });
+        // Try to find diagram with enhanced matching
+        const matchedDiagram = findMatchingDiagram(diagramName, diagramMap);
+        if (matchedDiagram) {
+          console.log(`Found diagram via enhanced matching: ${matchedDiagram.name}`);
+          const classNamesFromDiagram = getRelatedClassNamesFromDiagram(matchedDiagram);
+          classNamesFromDiagram.forEach(className => allRelatedClassNames.add(className));
         }
       }
     });
@@ -886,11 +932,11 @@ export const generateStubCode = (cls: ClassInfo): string => {
   const packageLine = cls.packageName && cls.packageName !== 'default' ? `package ${cls.packageName};\n\n` : '';
 
   let code = `${packageLine}/**
- * Enhanced Stub for ${cls.name}
- * Generated on ${new Date().toISOString()}
- * Features: Enhanced return values and console logging
- */
-public class ${cls.name}Stub {\n`;
+   * Enhanced Stub for ${cls.name}
+   * Generated on ${new Date().toISOString()}
+   * Features: Enhanced return values and console logging
+   */
+  public class ${cls.name}Stub {\n`;
 
   // Add stub methods with enhanced return value generation
   if (cls.methods && cls.methods.length > 0) {
@@ -1032,16 +1078,16 @@ export const generateDriverCode = (cls: ClassInfo): string => {
   const packageLine = cls.packageName ? `package ${cls.packageName};\n\n` : '';
 
   let code = `${packageLine}import org.junit.Test;
-import static org.junit.Assert.*;
+  import static org.junit.Assert.*;
 
-/**
- * Test Driver for ${cls.name}
- * Generated on ${new Date().toISOString()}
- */
-public class ${cls.name}Driver {
-    private ${cls.name} testObject = new ${cls.name}();
+  /**
+   * Test Driver for ${cls.name}
+   * Generated on ${new Date().toISOString()}
+   */
+  public class ${cls.name}Driver {
+      private ${cls.name} testObject = new ${cls.name}();
 
-`;
+  `;
 
   // Add test methods - ensure we have methods to test
   if (cls.methods && cls.methods.length > 0) {
@@ -1154,73 +1200,73 @@ public class ${cls.name}Driver {
 // Helper function to generate basic stub when class definition is not available
 export const generateBasicStubCode = (className: string): string => {
   return `/**
- * Basic Stub for ${className}
- * Generated on ${new Date().toISOString()}
- * Note: Class definition not found, this is a minimal stub
- */
-public class ${className}Stub {
-    
-    public ${className}Stub() {
-        // Default constructor
-        System.out.println("${className}Stub created");
-    }
-    
-    // Add commonly expected methods based on class name
-    ${generateCommonMethodsForClass(className)}
-    
-    // Generic method to handle any calls
-    public Object handleCall(String methodName, Object... args) {
-        System.out.println("Stub method called: " + methodName + " on ${className}Stub");
-        return null;
-    }
-}
-`;
+   * Basic Stub for ${className}
+   * Generated on ${new Date().toISOString()}
+   * Note: Class definition not found, this is a minimal stub
+   */
+  public class ${className}Stub {
+      
+      public ${className}Stub() {
+          // Default constructor
+          System.out.println("${className}Stub created");
+      }
+      
+      // Add commonly expected methods based on class name
+      ${generateCommonMethodsForClass(className)}
+      
+      // Generic method to handle any calls
+      public Object handleCall(String methodName, Object... args) {
+          System.out.println("Stub method called: " + methodName + " on ${className}Stub");
+          return null;
+      }
+  }
+  `;
 };
 
 // Helper function to generate basic driver when class definition is not available
 export const generateBasicDriverCode = (driverClassName: string, targetClassName: string): string => {
   return `import org.junit.Test;
-import static org.junit.Assert.*;
+  import static org.junit.Assert.*;
 
-/**
- * Basic Driver for ${driverClassName}
- * Generated on ${new Date().toISOString()}
- * Note: Class definition not found, this is a minimal driver
- */
-public class ${driverClassName}Driver {
-    
-    private ${targetClassName} targetObject;
-    
-    public void setUp() {
-        targetObject = new ${targetClassName}();
-    }
-    
-    @Test
-    public void testBasicInteraction() {
-        setUp();
-        
-        // Basic test to verify the target object can be created and interacted with
-        assertNotNull(targetObject);
-        System.out.println("${driverClassName}Driver successfully created ${targetClassName} object");
-        
-        // TODO: Add specific test methods based on your requirements
-        // This driver was generated because ${driverClassName} calls ${targetClassName}
-    }
-    
-    @Test
-    public void testDriverFunctionality() {
-        setUp();
-        
-        // Test that demonstrates ${driverClassName} can drive ${targetClassName}
-        try {
-            // TODO: Implement specific driver logic here
-            System.out.println("Driver test completed successfully");
-        } catch (Exception e) {
-            fail("Driver test failed: " + e.getMessage());
-        }
-    }
-}
-`;
+  /**
+   * Basic Driver for ${driverClassName}
+   * Generated on ${new Date().toISOString()}
+   * Note: Class definition not found, this is a minimal driver
+   */
+  public class ${driverClassName}Driver {
+      
+      private ${targetClassName} targetObject;
+      
+      public void setUp() {
+          targetObject = new ${targetClassName}();
+      }
+      
+      @Test
+      public void testBasicInteraction() {
+          setUp();
+          
+          // Basic test to verify the target object can be created and interacted with
+          assertNotNull(targetObject);
+          System.out.println("${driverClassName}Driver successfully created ${targetClassName} object");
+          
+          // TODO: Add specific test methods based on your requirements
+          // This driver was generated because ${driverClassName} calls ${targetClassName}
+      }
+      
+      @Test
+      public void testDriverFunctionality() {
+          setUp();
+          
+          // Test that demonstrates ${driverClassName} can drive ${targetClassName}
+          try {
+              // TODO: Implement specific driver logic here
+              System.out.println("Driver test completed successfully");
+          } catch (Exception e) {
+              fail("Driver test failed: " + e.getMessage());
+          }
+      }
+  }
+  `;
 };
 
 // Helper function to generate common methods based on class name patterns
