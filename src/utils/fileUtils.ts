@@ -423,7 +423,7 @@ const findMatchingDiagram = (refName: string, diagrams: Map<string, SequenceDiag
   return null;
 };
 
-// REPLACE the entire processSequenceDiagramFile function with this complete version:
+// REPLACE the entire processSequenceDiagramFile function with this updated version:
 export const processSequenceDiagramFile = async (file: File): Promise<SequenceDiagram | null> => {
   try {
     const content = await readFileAsText(file);
@@ -437,310 +437,200 @@ export const processSequenceDiagramFile = async (file: File): Promise<SequenceDi
       return null;
     }
 
-    console.log('Parsing Visual Paradigm sequence diagram XML...');
+    console.log('Parsing sequence diagram XML...');
 
-    // Check for Visual Paradigm structure
+    // Check for Project structure
     const projectElement = xmlDoc.getElementsByTagName('Project')[0];
-    if (!projectElement || projectElement.getAttribute('Xml_structure') !== 'simple') {
-      console.error('Not a valid Visual Paradigm XML file');
-      toast.error('Invalid Visual Paradigm XML format');
+    if (!projectElement) {
+      console.error('Not a valid XML file - no Project element');
+      toast.error('Invalid XML format');
       return null;
     }
 
-    // Extract diagram name
-    const diagramName = file.name.replace('.xml', '');
-    const diagramId = generateId();
-
-    // Find the interaction diagram
-    const diagramElements = xmlDoc.getElementsByTagName('InteractionDiagram');
-    if (diagramElements.length === 0) {
-      console.error('No InteractionDiagram found');
-      toast.error('No sequence diagram found in XML');
-      return null;
-    }
-
-    const diagram = diagramElements[0];
-    const frameId = diagram.getAttribute('_rootFrame');
-
-    console.log(`Processing diagram: ${diagramName}, frameId: ${frameId}`);
-
-    // Find the frame in Models
-    const frames = xmlDoc.getElementsByTagName('Frame');
-    let frame = null;
-    for (let i = 0; i < frames.length; i++) {
-      if (frames[i].getAttribute('Id') === frameId) {
-        frame = frames[i];
-        break;
-      }
-    }
-
-    if (!frame) {
-      console.error('Frame not found in Models');
+    // Find the Models section
+    const modelsElement = xmlDoc.getElementsByTagName('Models')[0];
+    if (!modelsElement) {
+      console.error('No Models element found');
       toast.error('Invalid sequence diagram structure');
       return null;
     }
 
-    // Extract objects from diagram shapes and map to model data
+    // Find the Model element (should contain the sequence diagram data)
+    const modelElement = modelsElement.getElementsByTagName('Model')[0];
+    if (!modelElement) {
+      console.error('No Model element found');
+      toast.error('Invalid sequence diagram structure');
+      return null;
+    }
+
+    // Extract diagram name from Model or use filename
+    const diagramName = modelElement.getAttribute('Name') || file.name.replace('.xml', '');
+    const diagramId = generateId();
+
+    console.log(`Processing sequence diagram: ${diagramName}`);
+
+    // Find ModelChildren containing the sequence diagram elements
+    const modelChildren = modelElement.getElementsByTagName('ModelChildren')[0];
+    if (!modelChildren) {
+      console.error('No ModelChildren found');
+      toast.error('Invalid sequence diagram structure');
+      return null;
+    }
+
+    // Extract objects from InteractionLifeLine elements
     const objects: ObjectNode[] = [];
-    const objectIdMap = new Map<string, string>(); // modelId -> objectNodeId
+    const lifeLineIdMap = new Map<string, string>(); // lifeline ID -> object node ID
 
-    const shapes = diagram.getElementsByTagName('Shapes')[0];
-    if (shapes) {
-      // Process InteractionLifeLine (regular objects)
-      const lifeLines = shapes.getElementsByTagName('InteractionLifeLine');
-      for (let i = 0; i < lifeLines.length; i++) {
-        const lifeLine = lifeLines[i];
-        const objectName = lifeLine.getAttribute('Name') || `Object${i}`;
-        const modelId = lifeLine.getAttribute('Model');
+    const lifeLines = modelChildren.getElementsByTagName('InteractionLifeLine');
+    console.log(`Found ${lifeLines.length} InteractionLifeLine elements`);
 
-        if (modelId) {
-          // Find the corresponding model in the frame
-          const lifeLineModels = frame.getElementsByTagName('InteractionLifeLine');
-          for (let j = 0; j < lifeLineModels.length; j++) {
-            const lifeLineModel = lifeLineModels[j];
-            if (lifeLineModel.getAttribute('Id') === modelId) {
-              // Get the base classifier (class name)
-              const baseClassifier = lifeLineModel.getElementsByTagName('BaseClassifier')[0];
-              if (baseClassifier) {
-                const classElement = baseClassifier.getElementsByTagName('Class')[0];
-                const className = classElement ? classElement.getAttribute('Name') || 'unknown' : 'unknown';
+    for (let i = 0; i < lifeLines.length; i++) {
+      const lifeLine = lifeLines[i];
+      const lifeLineId = lifeLine.getAttribute('Id');
+      const objectName = lifeLine.getAttribute('Name') || `Object${i}`;
 
-                const objectNodeId = generateId();
-                objects.push({
-                  id: objectNodeId,
-                  name: objectName,
-                  type: className
-                });
-                objectIdMap.set(modelId, objectNodeId);
-                console.log(`Added object: ${objectName} -> ${className}`);
-              }
-              break;
-            }
-          }
+      if (lifeLineId) {
+        const objectNodeId = generateId();
+        
+        // Determine object type based on name patterns
+        let objectType = 'unknown';
+        const lowerName = objectName.toLowerCase();
+        
+        if (lowerName === 'user' || lowerName.includes('actor')) {
+          objectType = 'ACTOR';
+        } else if (lowerName.includes('page') || lowerName.includes('ui')) {
+          objectType = 'UI';
+        } else if (lowerName.includes('controller')) {
+          objectType = 'Controller';
+        } else if (lowerName.includes('service')) {
+          objectType = 'Service';
+        } else if (lowerName.includes('dao') || lowerName.includes('database')) {
+          objectType = 'DAO';
+        } else if (lowerName.includes('gateway')) {
+          objectType = 'Gateway';
+        } else {
+          // Use the name as type for other objects
+          objectType = objectName;
         }
-      }
 
-      // Process InteractionActor (actors)
-      const actors = shapes.getElementsByTagName('InteractionActor');
-      for (let i = 0; i < actors.length; i++) {
-        const actor = actors[i];
-        const actorName = actor.getAttribute('Name') || `Actor${i}`;
-        const modelId = actor.getAttribute('Model');
-
-        if (modelId) {
-          const objectNodeId = generateId();
-          objects.push({
-            id: objectNodeId,
-            name: actorName,
-            type: 'ACTOR'
-          });
-          objectIdMap.set(modelId, objectNodeId);
-          console.log(`Added actor: ${actorName}`);
-        }
-      }
-
-      // Process InteractionOccurrence (REF objects)
-      const occurrences = shapes.getElementsByTagName('InteractionOccurrence');
-      for (let i = 0; i < occurrences.length; i++) {
-        const occurrence = occurrences[i];
-        const refName = occurrence.getAttribute('Name') || `Ref${i}`;
-        const modelId = occurrence.getAttribute('Model');
-
-        if (modelId) {
-          const objectNodeId = generateId();
-          objects.push({
-            id: objectNodeId,
-            name: refName,
-            type: 'REF'
-          });
-          objectIdMap.set(modelId, objectNodeId);
-          console.log(`Added reference: ${refName}`);
-        }
+        objects.push({
+          id: objectNodeId,
+          name: objectName,
+          type: objectType
+        });
+        
+        lifeLineIdMap.set(lifeLineId, objectNodeId);
+        console.log(`Added object: ${objectName} -> ${objectType} (ID: ${lifeLineId})`);
       }
     }
 
-    // Extract messages from ModelRelationshipContainer
+    // Extract messages
     const messages: Message[] = [];
-    const modelContainers = xmlDoc.getElementsByTagName('ModelRelationshipContainer');
+    const messageElements = modelChildren.getElementsByTagName('Message');
+    console.log(`Found ${messageElements.length} Message elements`);
 
-    for (let i = 0; i < modelContainers.length; i++) {
-      const container = modelContainers[i];
-      const messageElements = container.getElementsByTagName('Message');
+    for (let i = 0; i < messageElements.length; i++) {
+      const messageElement = messageElements[i];
+      const messageId = generateId();
+      const messageName = messageElement.getAttribute('Name') || `Message${i}`;
+      const isAsync = messageElement.getAttribute('Asynchronous') === 'true';
 
-      for (let j = 0; j < messageElements.length; j++) {
-        const messageElement = messageElements[j];
-        const messageId = generateId();
-        const messageName = messageElement.getAttribute('Name') || '';
-        const messageType = messageElement.getAttribute('Type') || 'Message';
+      // Get FromEnd and ToEnd
+      const fromEnd = messageElement.getElementsByTagName('FromEnd')[0];
+      const toEnd = messageElement.getElementsByTagName('ToEnd')[0];
 
-        const fromModelId = messageElement.getAttribute('EndRelationshipFromMetaModelElement');
-        const toModelId = messageElement.getAttribute('EndRelationshipToMetaModelElement');
+      if (fromEnd && toEnd) {
+        const fromMessageEnd = fromEnd.getElementsByTagName('MessageEnd')[0];
+        const toMessageEnd = toEnd.getElementsByTagName('MessageEnd')[0];
 
-        const fromObjectId = objectIdMap.get(fromModelId || '') || '';
-        const toObjectId = objectIdMap.get(toModelId || '') || '';
+        if (fromMessageEnd && toMessageEnd) {
+          const fromLifeLineId = fromMessageEnd.getAttribute('EndModelElement');
+          const toLifeLineId = toMessageEnd.getAttribute('EndModelElement');
 
-        if (fromObjectId && toObjectId) {
-          // Try to get operation name from ActionType
-          let operationName = messageName;
-          const actionType = messageElement.getElementsByTagName('ActionType')[0];
-          if (actionType) {
-            const actionTypeCall = actionType.getElementsByTagName('ActionTypeCall')[0];
-            if (actionTypeCall) {
-              const operationId = actionTypeCall.getAttribute('Operation');
-              if (operationId) {
-                // Find the operation in the XML
-                const operations = xmlDoc.getElementsByTagName('Operation');
-                for (let k = 0; k < operations.length; k++) {
-                  if (operations[k].getAttribute('Id') === operationId) {
-                    operationName = operations[k].getAttribute('Name') || messageName;
-                    break;
-                  }
-                }
-              }
+          const fromObjectId = lifeLineIdMap.get(fromLifeLineId || '');
+          const toObjectId = lifeLineIdMap.get(toLifeLineId || '');
+
+          if (fromObjectId && toObjectId) {
+            // Determine message type based on name patterns
+            let messageType: 'synchCall' | 'asynchCall' | 'create' | 'message' = 'synchCall';
+            
+            if (isAsync) {
+              messageType = 'asynchCall';
+            } else if (messageName.toLowerCase().includes('new ') || messageName.toLowerCase().includes('create')) {
+              messageType = 'create';
+            } else if (messageName.includes('(') && messageName.includes(')')) {
+              messageType = 'synchCall'; // Method call
+            } else {
+              messageType = 'message'; // Simple message
             }
+
+            messages.push({
+              id: messageId,
+              from: fromObjectId,
+              to: toObjectId,
+              name: messageName,
+              type: messageType
+            });
+
+            console.log(`Added message: ${messageName} from ${fromLifeLineId} to ${toLifeLineId} (type: ${messageType})`);
+          } else {
+            console.warn(`Could not map message endpoints: from=${fromLifeLineId}, to=${toLifeLineId}`);
           }
-
-          messages.push({
-            id: messageId,
-            from: fromObjectId,
-            to: toObjectId,
-            name: operationName,
-            type: messageType === 'Create Message' ? 'create' :
-              messageType === 'Message' ? 'synchCall' : 'message'
-          });
-
-          console.log(`Added message: ${operationName} from ${fromObjectId} to ${toObjectId}`);
         }
       }
     }
 
-    // Enhanced references extraction with better ref box detection
+    // Extract references (InteractionOccurrence or REF patterns)
     const references: Reference[] = [];
+    
+    // Look for InteractionOccurrence elements (REF boxes)
+    const occurrences = modelChildren.getElementsByTagName('InteractionOccurrence');
+    console.log(`Found ${occurrences.length} InteractionOccurrence elements for REF processing`);
 
-    // Method 1: Extract from InteractionOccurrence models in the frame
-    const occurrenceModels = frame.getElementsByTagName('InteractionOccurrence');
-    console.log(`Found ${occurrenceModels.length} InteractionOccurrence models for REF processing`);
+    for (let i = 0; i < occurrences.length; i++) {
+      const occurrence = occurrences[i];
+      const refId = occurrence.getAttribute('Id') || generateId();
+      const refName = occurrence.getAttribute('Name') || `Ref${i}`;
 
-    for (let i = 0; i < occurrenceModels.length; i++) {
-      const occurrenceModel = occurrenceModels[i];
-      const refId = occurrenceModel.getAttribute('Id') || generateId();
-      const refName = occurrenceModel.getAttribute('Name') || `Ref${i}`;
-
-      console.log(`Processing REF occurrence: ${refName} (ID: ${refId})`);
-
-      let referencedDiagramName = null;
-
-      // Enhanced Method: Check for TransitFrom -> Operation pattern (like your example)
-      const transitFrom = occurrenceModel.getElementsByTagName('TransitFrom')[0];
-      if (transitFrom) {
-        const operation = transitFrom.getElementsByTagName('Operation')[0];
-        if (operation) {
-          // Get operation name from Name attribute
-          const operationName = operation.getAttribute('Name');
-          if (operationName) {
-            referencedDiagramName = operationName;
-            console.log(`Found referenced diagram via TransitFrom->Operation: ${referencedDiagramName}`);
-          }
-
-          // Also try Idref attribute as fallback
-          if (!referencedDiagramName) {
-            const operationIdref = operation.getAttribute('Idref');
-            if (operationIdref) {
-              // Try to find the operation definition by Idref
-              const allOperations = xmlDoc.getElementsByTagName('Operation');
-              for (let k = 0; k < allOperations.length; k++) {
-                if (allOperations[k].getAttribute('Id') === operationIdref) {
-                  referencedDiagramName = allOperations[k].getAttribute('Name');
-                  console.log(`Found referenced diagram via Idref lookup: ${referencedDiagramName}`);
-                  break;
-                }
-              }
-            }
-          }
-        }
-      }
-
-      // Method 2: Check for CoveredInteraction (fallback)
-      if (!referencedDiagramName) {
-        const coveredInteraction = occurrenceModel.getElementsByTagName('CoveredInteraction')[0];
-        if (coveredInteraction) {
-          const interactionRef = coveredInteraction.getElementsByTagName('Interaction')[0];
-          if (interactionRef) {
-            referencedDiagramName = interactionRef.getAttribute('Name');
-            console.log(`Found referenced diagram via CoveredInteraction: ${referencedDiagramName}`);
-          }
-        }
-      }
-
-      // Method 3: Extract from Messages that reference this occurrence
-      if (!referencedDiagramName) {
-        // Look for messages in ModelRelationshipContainer that might reference this occurrence
-        const allMessages = xmlDoc.getElementsByTagName('Message');
-        for (let j = 0; j < allMessages.length; j++) {
-          const msg = allMessages[j];
-          const transitFromMsg = msg.getElementsByTagName('TransitFrom')[0];
-          if (transitFromMsg) {
-            const operationInMsg = transitFromMsg.getElementsByTagName('Operation')[0];
-            if (operationInMsg) {
-              const msgOpName = operationInMsg.getAttribute('Name');
-              if (msgOpName && (msgOpName.toLowerCase().includes(refName.toLowerCase()) ||
-                refName.toLowerCase().includes(msgOpName.toLowerCase()))) {
-                referencedDiagramName = msgOpName;
-                console.log(`Found referenced diagram via Message operation: ${referencedDiagramName}`);
-                break;
-              }
-            }
-          }
-        }
-      }
-
-      // Method 4: Parse from the ref name itself if it looks like a diagram reference
-      if (!referencedDiagramName && refName) {
-        // Enhanced pattern matching for REF names
-        const variations = enhanceRefNameMatching(refName);
-        referencedDiagramName = variations[0]; // Use the first (cleaned) variation
-        console.log(`Using parsed REF name: ${referencedDiagramName}`);
+      // Try to extract referenced diagram name
+      let referencedDiagramName = refName;
+      
+      // Clean up the reference name to get potential diagram name
+      const cleanedName = refName.replace(/^(ref\s+|sd\s+)/i, '').trim();
+      if (cleanedName !== refName) {
+        referencedDiagramName = cleanedName;
       }
 
       references.push({
         id: refId,
         name: refName,
-        diagramName: referencedDiagramName || undefined
+        diagramName: referencedDiagramName
       });
 
-      console.log(`Added reference: ${refName} -> ${referencedDiagramName || 'unknown'}`);
+      console.log(`Added reference: ${refName} -> ${referencedDiagramName}`);
     }
 
-    // Method 2: Also check messages directly for operation calls that might be REF boxes
-    const allMessages = xmlDoc.getElementsByTagName('Message');
-    console.log(`Checking ${allMessages.length} messages for additional REF operations`);
-
-    for (let i = 0; i < allMessages.length; i++) {
-      const message = allMessages[i];
-      const transitFrom = message.getElementsByTagName('TransitFrom')[0];
-
-      if (transitFrom) {
-        const operation = transitFrom.getElementsByTagName('Operation')[0];
-        if (operation) {
-          const operationName = operation.getAttribute('Name');
-          const operationIdref = operation.getAttribute('Idref');
-
-          // Check if this operation might be a reference to another diagram
-          if (operationName && !references.some(ref => ref.diagramName === operationName)) {
-            // This looks like it might be a referenced operation/diagram
-            const refId = generateId();
-
-            references.push({
-              id: refId,
-              name: `REF_${operationName}`,
-              diagramName: operationName
-            });
-
-            console.log(`Added operation-based reference: REF_${operationName} -> ${operationName}`);
-          }
+    // Also check for messages that might indicate references to other diagrams
+    messages.forEach(message => {
+      const lowerName = message.name.toLowerCase();
+      if (lowerName.includes('ref ') || lowerName.startsWith('sd ') || 
+          (lowerName.includes('call') && lowerName.includes('diagram'))) {
+        
+        // This might be a reference to another diagram
+        const refId = generateId();
+        const potentialDiagramName = message.name.replace(/^(ref\s+|sd\s+|call\s+)/i, '').trim();
+        
+        if (!references.some(ref => ref.diagramName === potentialDiagramName)) {
+          references.push({
+            id: refId,
+            name: `REF_${potentialDiagramName}`,
+            diagramName: potentialDiagramName
+          });
+          
+          console.log(`Added reference from message: REF_${potentialDiagramName} -> ${potentialDiagramName}`);
         }
       }
-    }
+    });
 
     console.log('Processed sequence diagram:', {
       diagramId,
@@ -1480,7 +1370,7 @@ export const generateDriverCode = (cls: ClassInfo): string => {
         }
 
         paramValues.push(param.name);
-        paramDeclarations.push(declaration);
+        paramDeclarations.push(decl);
       });
 
       // Add parameter declarations to code
