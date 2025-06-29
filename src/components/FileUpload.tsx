@@ -50,10 +50,10 @@ export default function FileUpload() {
         }
         
         // Process file
-        const result = await addFile(file, activeTab);
+        await addFile(file, activeTab);
         
         // If this is a sequence diagram, check for REF boxes and show status
-        if (activeTab === 'sequenceDiagram' && result) {
+        if (activeTab === 'sequenceDiagram') {
           const diagram = sequenceDiagrams.find(d => d.name === file.name.replace('.xml', ''));
           if (diagram && diagram.references.length > 0) {
             console.log('Processing REF boxes for diagram:', diagram.name);
