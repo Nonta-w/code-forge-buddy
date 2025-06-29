@@ -423,7 +423,7 @@ const findMatchingDiagram = (refName: string, diagrams: Map<string, SequenceDiag
   return null;
 };
 
-// REPLACE the entire processSequenceDiagramFile function with this updated version:
+// REPLACE the entire processSequenceDiagramFile function with this complete version:
 export const processSequenceDiagramFile = async (file: File): Promise<SequenceDiagram | null> => {
   try {
     const content = await readFileAsText(file);
@@ -437,200 +437,310 @@ export const processSequenceDiagramFile = async (file: File): Promise<SequenceDi
       return null;
     }
 
-    console.log('Parsing sequence diagram XML...');
+    console.log('Parsing Visual Paradigm sequence diagram XML...');
 
-    // Check for Project structure
+    // Check for Visual Paradigm structure
     const projectElement = xmlDoc.getElementsByTagName('Project')[0];
-    if (!projectElement) {
-      console.error('Not a valid XML file - no Project element');
-      toast.error('Invalid XML format');
+    if (!projectElement || projectElement.getAttribute('Xml_structure') !== 'simple') {
+      console.error('Not a valid Visual Paradigm XML file');
+      toast.error('Invalid Visual Paradigm XML format');
       return null;
     }
 
-    // Find the Models section
-    const modelsElement = xmlDoc.getElementsByTagName('Models')[0];
-    if (!modelsElement) {
-      console.error('No Models element found');
-      toast.error('Invalid sequence diagram structure');
-      return null;
-    }
-
-    // Find the Model element (should contain the sequence diagram data)
-    const modelElement = modelsElement.getElementsByTagName('Model')[0];
-    if (!modelElement) {
-      console.error('No Model element found');
-      toast.error('Invalid sequence diagram structure');
-      return null;
-    }
-
-    // Extract diagram name from Model or use filename
-    const diagramName = modelElement.getAttribute('Name') || file.name.replace('.xml', '');
+    // Extract diagram name
+    const diagramName = file.name.replace('.xml', '');
     const diagramId = generateId();
 
-    console.log(`Processing sequence diagram: ${diagramName}`);
-
-    // Find ModelChildren containing the sequence diagram elements
-    const modelChildren = modelElement.getElementsByTagName('ModelChildren')[0];
-    if (!modelChildren) {
-      console.error('No ModelChildren found');
-      toast.error('Invalid sequence diagram structure');
+    // Find the interaction diagram
+    const diagramElements = xmlDoc.getElementsByTagName('InteractionDiagram');
+    if (diagramElements.length === 0) {
+      console.error('No InteractionDiagram found');
+      toast.error('No sequence diagram found in XML');
       return null;
     }
 
-    // Extract objects from InteractionLifeLine elements
-    const objects: ObjectNode[] = [];
-    const lifeLineIdMap = new Map<string, string>(); // lifeline ID -> object node ID
+    const diagram = diagramElements[0];
+    const frameId = diagram.getAttribute('_rootFrame');
 
-    const lifeLines = modelChildren.getElementsByTagName('InteractionLifeLine');
-    console.log(`Found ${lifeLines.length} InteractionLifeLine elements`);
+    console.log(`Processing diagram: ${diagramName}, frameId: ${frameId}`);
 
-    for (let i = 0; i < lifeLines.length; i++) {
-      const lifeLine = lifeLines[i];
-      const lifeLineId = lifeLine.getAttribute('Id');
-      const objectName = lifeLine.getAttribute('Name') || `Object${i}`;
-
-      if (lifeLineId) {
-        const objectNodeId = generateId();
-        
-        // Determine object type based on name patterns
-        let objectType = 'unknown';
-        const lowerName = objectName.toLowerCase();
-        
-        if (lowerName === 'user' || lowerName.includes('actor')) {
-          objectType = 'ACTOR';
-        } else if (lowerName.includes('page') || lowerName.includes('ui')) {
-          objectType = 'UI';
-        } else if (lowerName.includes('controller')) {
-          objectType = 'Controller';
-        } else if (lowerName.includes('service')) {
-          objectType = 'Service';
-        } else if (lowerName.includes('dao') || lowerName.includes('database')) {
-          objectType = 'DAO';
-        } else if (lowerName.includes('gateway')) {
-          objectType = 'Gateway';
-        } else {
-          // Use the name as type for other objects
-          objectType = objectName;
-        }
-
-        objects.push({
-          id: objectNodeId,
-          name: objectName,
-          type: objectType
-        });
-        
-        lifeLineIdMap.set(lifeLineId, objectNodeId);
-        console.log(`Added object: ${objectName} -> ${objectType} (ID: ${lifeLineId})`);
+    // Find the frame in Models
+    const frames = xmlDoc.getElementsByTagName('Frame');
+    let frame = null;
+    for (let i = 0; i < frames.length; i++) {
+      if (frames[i].getAttribute('Id') === frameId) {
+        frame = frames[i];
+        break;
       }
     }
 
-    // Extract messages
-    const messages: Message[] = [];
-    const messageElements = modelChildren.getElementsByTagName('Message');
-    console.log(`Found ${messageElements.length} Message elements`);
+    if (!frame) {
+      console.error('Frame not found in Models');
+      toast.error('Invalid sequence diagram structure');
+      return null;
+    }
 
-    for (let i = 0; i < messageElements.length; i++) {
-      const messageElement = messageElements[i];
-      const messageId = generateId();
-      const messageName = messageElement.getAttribute('Name') || `Message${i}`;
-      const isAsync = messageElement.getAttribute('Asynchronous') === 'true';
+    // Extract objects from diagram shapes and map to model data
+    const objects: ObjectNode[] = [];
+    const objectIdMap = new Map<string, string>(); // modelId -> objectNodeId
 
-      // Get FromEnd and ToEnd
-      const fromEnd = messageElement.getElementsByTagName('FromEnd')[0];
-      const toEnd = messageElement.getElementsByTagName('ToEnd')[0];
+    const shapes = diagram.getElementsByTagName('Shapes')[0];
+    if (shapes) {
+      // Process InteractionLifeLine (regular objects)
+      const lifeLines = shapes.getElementsByTagName('InteractionLifeLine');
+      for (let i = 0; i < lifeLines.length; i++) {
+        const lifeLine = lifeLines[i];
+        const objectName = lifeLine.getAttribute('Name') || `Object${i}`;
+        const modelId = lifeLine.getAttribute('Model');
 
-      if (fromEnd && toEnd) {
-        const fromMessageEnd = fromEnd.getElementsByTagName('MessageEnd')[0];
-        const toMessageEnd = toEnd.getElementsByTagName('MessageEnd')[0];
+        if (modelId) {
+          // Find the corresponding model in the frame
+          const lifeLineModels = frame.getElementsByTagName('InteractionLifeLine');
+          for (let j = 0; j < lifeLineModels.length; j++) {
+            const lifeLineModel = lifeLineModels[j];
+            if (lifeLineModel.getAttribute('Id') === modelId) {
+              // Get the base classifier (class name)
+              const baseClassifier = lifeLineModel.getElementsByTagName('BaseClassifier')[0];
+              if (baseClassifier) {
+                const classElement = baseClassifier.getElementsByTagName('Class')[0];
+                const className = classElement ? classElement.getAttribute('Name') || 'unknown' : 'unknown';
 
-        if (fromMessageEnd && toMessageEnd) {
-          const fromLifeLineId = fromMessageEnd.getAttribute('EndModelElement');
-          const toLifeLineId = toMessageEnd.getAttribute('EndModelElement');
-
-          const fromObjectId = lifeLineIdMap.get(fromLifeLineId || '');
-          const toObjectId = lifeLineIdMap.get(toLifeLineId || '');
-
-          if (fromObjectId && toObjectId) {
-            // Determine message type based on name patterns
-            let messageType: 'synchCall' | 'asynchCall' | 'create' | 'message' = 'synchCall';
-            
-            if (isAsync) {
-              messageType = 'asynchCall';
-            } else if (messageName.toLowerCase().includes('new ') || messageName.toLowerCase().includes('create')) {
-              messageType = 'create';
-            } else if (messageName.includes('(') && messageName.includes(')')) {
-              messageType = 'synchCall'; // Method call
-            } else {
-              messageType = 'message'; // Simple message
+                const objectNodeId = generateId();
+                objects.push({
+                  id: objectNodeId,
+                  name: objectName,
+                  type: className
+                });
+                objectIdMap.set(modelId, objectNodeId);
+                console.log(`Added object: ${objectName} -> ${className}`);
+              }
+              break;
             }
-
-            messages.push({
-              id: messageId,
-              from: fromObjectId,
-              to: toObjectId,
-              name: messageName,
-              type: messageType
-            });
-
-            console.log(`Added message: ${messageName} from ${fromLifeLineId} to ${toLifeLineId} (type: ${messageType})`);
-          } else {
-            console.warn(`Could not map message endpoints: from=${fromLifeLineId}, to=${toLifeLineId}`);
           }
         }
       }
+
+      // Process InteractionActor (actors)
+      const actors = shapes.getElementsByTagName('InteractionActor');
+      for (let i = 0; i < actors.length; i++) {
+        const actor = actors[i];
+        const actorName = actor.getAttribute('Name') || `Actor${i}`;
+        const modelId = actor.getAttribute('Model');
+
+        if (modelId) {
+          const objectNodeId = generateId();
+          objects.push({
+            id: objectNodeId,
+            name: actorName,
+            type: 'ACTOR'
+          });
+          objectIdMap.set(modelId, objectNodeId);
+          console.log(`Added actor: ${actorName}`);
+        }
+      }
+
+      // Process InteractionOccurrence (REF objects)
+      const occurrences = shapes.getElementsByTagName('InteractionOccurrence');
+      for (let i = 0; i < occurrences.length; i++) {
+        const occurrence = occurrences[i];
+        const refName = occurrence.getAttribute('Name') || `Ref${i}`;
+        const modelId = occurrence.getAttribute('Model');
+
+        if (modelId) {
+          const objectNodeId = generateId();
+          objects.push({
+            id: objectNodeId,
+            name: refName,
+            type: 'REF'
+          });
+          objectIdMap.set(modelId, objectNodeId);
+          console.log(`Added reference: ${refName}`);
+        }
+      }
     }
 
-    // Extract references (InteractionOccurrence or REF patterns)
+    // Extract messages from ModelRelationshipContainer
+    const messages: Message[] = [];
+    const modelContainers = xmlDoc.getElementsByTagName('ModelRelationshipContainer');
+
+    for (let i = 0; i < modelContainers.length; i++) {
+      const container = modelContainers[i];
+      const messageElements = container.getElementsByTagName('Message');
+
+      for (let j = 0; j < messageElements.length; j++) {
+        const messageElement = messageElements[j];
+        const messageId = generateId();
+        const messageName = messageElement.getAttribute('Name') || '';
+        const messageType = messageElement.getAttribute('Type') || 'Message';
+
+        const fromModelId = messageElement.getAttribute('EndRelationshipFromMetaModelElement');
+        const toModelId = messageElement.getAttribute('EndRelationshipToMetaModelElement');
+
+        const fromObjectId = objectIdMap.get(fromModelId || '') || '';
+        const toObjectId = objectIdMap.get(toModelId || '') || '';
+
+        if (fromObjectId && toObjectId) {
+          // Try to get operation name from ActionType
+          let operationName = messageName;
+          const actionType = messageElement.getElementsByTagName('ActionType')[0];
+          if (actionType) {
+            const actionTypeCall = actionType.getElementsByTagName('ActionTypeCall')[0];
+            if (actionTypeCall) {
+              const operationId = actionTypeCall.getAttribute('Operation');
+              if (operationId) {
+                // Find the operation in the XML
+                const operations = xmlDoc.getElementsByTagName('Operation');
+                for (let k = 0; k < operations.length; k++) {
+                  if (operations[k].getAttribute('Id') === operationId) {
+                    operationName = operations[k].getAttribute('Name') || messageName;
+                    break;
+                  }
+                }
+              }
+            }
+          }
+
+          messages.push({
+            id: messageId,
+            from: fromObjectId,
+            to: toObjectId,
+            name: operationName,
+            type: messageType === 'Create Message' ? 'create' :
+              messageType === 'Message' ? 'synchCall' : 'message'
+          });
+
+          console.log(`Added message: ${operationName} from ${fromObjectId} to ${toObjectId}`);
+        }
+      }
+    }
+
+    // Enhanced references extraction with better ref box detection
     const references: Reference[] = [];
-    
-    // Look for InteractionOccurrence elements (REF boxes)
-    const occurrences = modelChildren.getElementsByTagName('InteractionOccurrence');
-    console.log(`Found ${occurrences.length} InteractionOccurrence elements for REF processing`);
 
-    for (let i = 0; i < occurrences.length; i++) {
-      const occurrence = occurrences[i];
-      const refId = occurrence.getAttribute('Id') || generateId();
-      const refName = occurrence.getAttribute('Name') || `Ref${i}`;
+    // Method 1: Extract from InteractionOccurrence models in the frame
+    const occurrenceModels = frame.getElementsByTagName('InteractionOccurrence');
+    console.log(`Found ${occurrenceModels.length} InteractionOccurrence models for REF processing`);
 
-      // Try to extract referenced diagram name
-      let referencedDiagramName = refName;
-      
-      // Clean up the reference name to get potential diagram name
-      const cleanedName = refName.replace(/^(ref\s+|sd\s+)/i, '').trim();
-      if (cleanedName !== refName) {
-        referencedDiagramName = cleanedName;
+    for (let i = 0; i < occurrenceModels.length; i++) {
+      const occurrenceModel = occurrenceModels[i];
+      const refId = occurrenceModel.getAttribute('Id') || generateId();
+      const refName = occurrenceModel.getAttribute('Name') || `Ref${i}`;
+
+      console.log(`Processing REF occurrence: ${refName} (ID: ${refId})`);
+
+      let referencedDiagramName = null;
+
+      // Enhanced Method: Check for TransitFrom -> Operation pattern (like your example)
+      const transitFrom = occurrenceModel.getElementsByTagName('TransitFrom')[0];
+      if (transitFrom) {
+        const operation = transitFrom.getElementsByTagName('Operation')[0];
+        if (operation) {
+          // Get operation name from Name attribute
+          const operationName = operation.getAttribute('Name');
+          if (operationName) {
+            referencedDiagramName = operationName;
+            console.log(`Found referenced diagram via TransitFrom->Operation: ${referencedDiagramName}`);
+          }
+
+          // Also try Idref attribute as fallback
+          if (!referencedDiagramName) {
+            const operationIdref = operation.getAttribute('Idref');
+            if (operationIdref) {
+              // Try to find the operation definition by Idref
+              const allOperations = xmlDoc.getElementsByTagName('Operation');
+              for (let k = 0; k < allOperations.length; k++) {
+                if (allOperations[k].getAttribute('Id') === operationIdref) {
+                  referencedDiagramName = allOperations[k].getAttribute('Name');
+                  console.log(`Found referenced diagram via Idref lookup: ${referencedDiagramName}`);
+                  break;
+                }
+              }
+            }
+          }
+        }
+      }
+
+      // Method 2: Check for CoveredInteraction (fallback)
+      if (!referencedDiagramName) {
+        const coveredInteraction = occurrenceModel.getElementsByTagName('CoveredInteraction')[0];
+        if (coveredInteraction) {
+          const interactionRef = coveredInteraction.getElementsByTagName('Interaction')[0];
+          if (interactionRef) {
+            referencedDiagramName = interactionRef.getAttribute('Name');
+            console.log(`Found referenced diagram via CoveredInteraction: ${referencedDiagramName}`);
+          }
+        }
+      }
+
+      // Method 3: Extract from Messages that reference this occurrence
+      if (!referencedDiagramName) {
+        // Look for messages in ModelRelationshipContainer that might reference this occurrence
+        const allMessages = xmlDoc.getElementsByTagName('Message');
+        for (let j = 0; j < allMessages.length; j++) {
+          const msg = allMessages[j];
+          const transitFromMsg = msg.getElementsByTagName('TransitFrom')[0];
+          if (transitFromMsg) {
+            const operationInMsg = transitFromMsg.getElementsByTagName('Operation')[0];
+            if (operationInMsg) {
+              const msgOpName = operationInMsg.getAttribute('Name');
+              if (msgOpName && (msgOpName.toLowerCase().includes(refName.toLowerCase()) ||
+                refName.toLowerCase().includes(msgOpName.toLowerCase()))) {
+                referencedDiagramName = msgOpName;
+                console.log(`Found referenced diagram via Message operation: ${referencedDiagramName}`);
+                break;
+              }
+            }
+          }
+        }
+      }
+
+      // Method 4: Parse from the ref name itself if it looks like a diagram reference
+      if (!referencedDiagramName && refName) {
+        // Enhanced pattern matching for REF names
+        const variations = enhanceRefNameMatching(refName);
+        referencedDiagramName = variations[0]; // Use the first (cleaned) variation
+        console.log(`Using parsed REF name: ${referencedDiagramName}`);
       }
 
       references.push({
         id: refId,
         name: refName,
-        diagramName: referencedDiagramName
+        diagramName: referencedDiagramName || undefined
       });
 
-      console.log(`Added reference: ${refName} -> ${referencedDiagramName}`);
+      console.log(`Added reference: ${refName} -> ${referencedDiagramName || 'unknown'}`);
     }
 
-    // Also check for messages that might indicate references to other diagrams
-    messages.forEach(message => {
-      const lowerName = message.name.toLowerCase();
-      if (lowerName.includes('ref ') || lowerName.startsWith('sd ') || 
-          (lowerName.includes('call') && lowerName.includes('diagram'))) {
-        
-        // This might be a reference to another diagram
-        const refId = generateId();
-        const potentialDiagramName = message.name.replace(/^(ref\s+|sd\s+|call\s+)/i, '').trim();
-        
-        if (!references.some(ref => ref.diagramName === potentialDiagramName)) {
-          references.push({
-            id: refId,
-            name: `REF_${potentialDiagramName}`,
-            diagramName: potentialDiagramName
-          });
-          
-          console.log(`Added reference from message: REF_${potentialDiagramName} -> ${potentialDiagramName}`);
+    // Method 2: Also check messages directly for operation calls that might be REF boxes
+    const allMessages = xmlDoc.getElementsByTagName('Message');
+    console.log(`Checking ${allMessages.length} messages for additional REF operations`);
+
+    for (let i = 0; i < allMessages.length; i++) {
+      const message = allMessages[i];
+      const transitFrom = message.getElementsByTagName('TransitFrom')[0];
+
+      if (transitFrom) {
+        const operation = transitFrom.getElementsByTagName('Operation')[0];
+        if (operation) {
+          const operationName = operation.getAttribute('Name');
+          const operationIdref = operation.getAttribute('Idref');
+
+          // Check if this operation might be a reference to another diagram
+          if (operationName && !references.some(ref => ref.diagramName === operationName)) {
+            // This looks like it might be a referenced operation/diagram
+            const refId = generateId();
+
+            references.push({
+              id: refId,
+              name: `REF_${operationName}`,
+              diagramName: operationName
+            });
+
+            console.log(`Added operation-based reference: REF_${operationName} -> ${operationName}`);
+          }
         }
       }
-    });
+    }
 
     console.log('Processed sequence diagram:', {
       diagramId,
@@ -663,7 +773,7 @@ export const processSequenceDiagramFile = async (file: File): Promise<SequenceDi
   }
 };
 
-// Process uploaded Class Diagram file with improved handling for your XML format
+// Process uploaded Class Diagram file with improved deduplication
 export const processClassDiagramFile = async (file: File): Promise<ClassInfo[] | null> => {
   try {
     const content = await readFileAsText(file);
@@ -677,248 +787,117 @@ export const processClassDiagramFile = async (file: File): Promise<ClassInfo[] |
       return null;
     }
 
-    console.log('Parsing class diagram XML...');
+    console.log('Parsing Visual Paradigm class diagram XML...');
 
-    // Check for Project element (your XML structure)
+    // Check for Visual Paradigm structure
     const projectElement = xmlDoc.getElementsByTagName('Project')[0];
-    if (!projectElement) {
-      console.error('Not a valid XML file - no Project element');
-      toast.error('Invalid XML format - no Project element found');
+    if (!projectElement || projectElement.getAttribute('Xml_structure') !== 'simple') {
+      console.error('Not a valid Visual Paradigm XML file');
+      toast.error('Invalid Visual Paradigm XML format');
       return null;
     }
 
-    // Extract classes from your XML format
+    // Extract classes from Visual Paradigm format
     const modelsElement = xmlDoc.getElementsByTagName('Models')[0];
     if (!modelsElement) {
       console.error('No Models element found in XML');
-      toast.error('Invalid XML format - no Models element');
+      toast.error('Invalid Visual Paradigm XML format - no Models element');
       return null;
     }
 
-    console.log('Found Models element, processing classes...');
+    // Get all Class elements under Models (including nested in packages)
+    const classElements = modelsElement.getElementsByTagName('Class');
+    const classesMap = new Map<string, ClassInfo>(); // Use composite key for deduplication
 
-    // Create a map to resolve DataType references
-    const dataTypeMap = new Map<string, string>();
-    const dataTypes = modelsElement.getElementsByTagName('DataType');
-    for (let i = 0; i < dataTypes.length; i++) {
-      const dataType = dataTypes[i];
-      const id = dataType.getAttribute('Id');
-      const name = dataType.getAttribute('Name');
-      if (id && name) {
-        dataTypeMap.set(id, name);
+    console.log(`Found ${classElements.length} class elements`);
+
+    for (let i = 0; i < classElements.length; i++) {
+      const classElement = classElements[i];
+      const xmlId = classElement.getAttribute('Id') || generateId();
+      const name = classElement.getAttribute('Name') || `Class${i}`;
+
+      // Skip classes with empty or invalid names
+      if (!name || name.trim() === '' || name === 'Class' || name.startsWith('Class')) {
+        console.log(`Skipping invalid class name: ${name}`);
+        continue;
       }
-    }
-    console.log(`Found ${dataTypeMap.size} data type mappings`);
 
-    // Helper function to resolve data type references
-    const resolveDataType = (element: Element): string => {
-      if (!element) return 'Object';
-      
-      // Check for direct DataType with Idref
-      const dataTypeElement = element.getElementsByTagName('DataType')[0];
-      if (dataTypeElement) {
-        const idref = dataTypeElement.getAttribute('Idref');
-        const name = dataTypeElement.getAttribute('Name');
-        
-        if (idref && dataTypeMap.has(idref)) {
-          return dataTypeMap.get(idref)!;
-        } else if (name) {
-          return name;
-        }
-      }
-      
-      return 'Object';
-    };
-
-    const classesMap = new Map<string, ClassInfo>();
-
-    // Process packages and their classes
-    const packages = modelsElement.getElementsByTagName('Package');
-    console.log(`Found ${packages.length} packages`);
-
-    for (let i = 0; i < packages.length; i++) {
-      const packageElement = packages[i];
-      const packageName = packageElement.getAttribute('Name') || 'default';
-      
-      console.log(`Processing package: ${packageName}`);
-
-      const modelChildren = packageElement.getElementsByTagName('ModelChildren')[0];
-      if (!modelChildren) continue;
-
-      const classElements = modelChildren.getElementsByTagName('Class');
-      console.log(`Found ${classElements.length} classes in package ${packageName}`);
-
-      for (let j = 0; j < classElements.length; j++) {
-        const classElement = classElements[j];
-        const className = classElement.getAttribute('Name');
-        const classId = classElement.getAttribute('Id') || generateId();
-
-        if (!className || className.trim() === '') {
-          console.log('Skipping class with empty name');
-          continue;
-        }
-
-        console.log(`Processing class: ${className} in package: ${packageName}`);
-
-        const methods: MethodInfo[] = [];
-        const classModelChildren = classElement.getElementsByTagName('ModelChildren')[0];
-
-        if (classModelChildren) {
-          const operations = classModelChildren.getElementsByTagName('Operation');
-          console.log(`Found ${operations.length} operations for class ${className}`);
-
-          for (let k = 0; k < operations.length; k++) {
-            const operation = operations[k];
-            const methodName = operation.getAttribute('Name');
-            const visibility = operation.getAttribute('Visibility') || 'public';
-
-            if (!methodName || methodName.trim() === '') {
-              continue;
-            }
-
-            console.log(`Processing operation: ${methodName}`);
-
-            // Get return type
-            let returnType = 'void';
-            const returnTypeElement = operation.getElementsByTagName('ReturnType')[0];
-            if (returnTypeElement) {
-              returnType = resolveDataType(returnTypeElement);
-            }
-
-            // Get parameters
-            const parameters: ParameterInfo[] = [];
-            const operationModelChildren = operation.getElementsByTagName('ModelChildren')[0];
-            
-            if (operationModelChildren) {
-              const paramElements = operationModelChildren.getElementsByTagName('Parameter');
-              
-              for (let l = 0; l < paramElements.length; l++) {
-                const paramElement = paramElements[l];
-                const paramName = paramElement.getAttribute('Name');
-                
-                if (!paramName) continue;
-
-                // Get parameter type
-                let paramType = 'Object';
-                const typeElement = paramElement.getElementsByTagName('Type')[0];
-                if (typeElement) {
-                  paramType = resolveDataType(typeElement);
-                }
-
-                parameters.push({
-                  name: paramName,
-                  type: paramType
-                });
-              }
-            }
-
-            methods.push({
-              id: generateId(),
-              name: methodName,
-              returnType,
-              visibility: visibility.toLowerCase(),
-              parameters
-            });
-          }
-        }
-
-        // Create composite key for deduplication
-        const compositeKey = `${packageName}.${className}`;
-
-        // Check for duplicates
-        if (classesMap.has(compositeKey)) {
-          const existingClass = classesMap.get(compositeKey)!;
-          console.log(`Duplicate found for ${compositeKey}, merging methods`);
-          
-          // Merge methods
-          const methodMap = new Map<string, MethodInfo>();
-          
-          // Add existing methods
-          existingClass.methods.forEach(method => {
-            const methodKey = `${method.name}(${method.parameters.map(p => p.type).join(',')})`;
-            methodMap.set(methodKey, method);
-          });
-          
-          // Add new methods
-          methods.forEach(method => {
-            const methodKey = `${method.name}(${method.parameters.map(p => p.type).join(',')})`;
-            methodMap.set(methodKey, method);
-          });
-          
-          existingClass.methods = Array.from(methodMap.values());
-        } else {
-          // New class
-          classesMap.set(compositeKey, {
-            id: generateId(),
-            name: className,
-            packageName,
-            methods,
-            relatedFunctions: []
-          });
-        }
-
-        console.log(`Added class: ${compositeKey} with ${methods.length} methods`);
-      }
-    }
-
-    // Also check for classes directly under Models (not in packages)
-    const directClasses = modelsElement.getElementsByTagName('Class');
-    for (let i = 0; i < directClasses.length; i++) {
-      const classElement = directClasses[i];
-      
-      // Skip if this class is already processed (inside a package)
-      let isInPackage = false;
-      let parent = classElement.parentElement;
-      while (parent && parent !== modelsElement) {
-        if (parent.tagName === 'Package') {
-          isInPackage = true;
+      // Extract package name
+      let packageName = 'default';
+      let parentElement = classElement.parentElement;
+      while (parentElement && parentElement.tagName !== 'Models') {
+        if (parentElement.tagName === 'Package') {
+          packageName = parentElement.getAttribute('Name') || 'default';
           break;
         }
-        parent = parent.parentElement;
+        parentElement = parentElement.parentElement;
       }
-      
-      if (isInPackage) continue;
 
-      const className = classElement.getAttribute('Name');
-      if (!className || className.trim() === '') continue;
+      // Create composite key: package.className
+      const compositeKey = `${packageName}.${name}`;
 
-      console.log(`Processing direct class: ${className}`);
+      console.log(`Processing class: ${name} (${xmlId}) in package: ${packageName}`);
 
+      // Extract operations (methods) from Visual Paradigm format
+      const modelChildren = classElement.getElementsByTagName('ModelChildren')[0];
       const methods: MethodInfo[] = [];
-      const classModelChildren = classElement.getElementsByTagName('ModelChildren')[0];
 
-      if (classModelChildren) {
-        const operations = classModelChildren.getElementsByTagName('Operation');
-        
-        for (let j = 0; j < operations.length; j++) {
-          const operation = operations[j];
-          const methodName = operation.getAttribute('Name');
-          const visibility = operation.getAttribute('Visibility') || 'public';
+      if (modelChildren) {
+        const operationElements = modelChildren.getElementsByTagName('Operation');
 
-          if (!methodName) continue;
+        console.log(`Found ${operationElements.length} operations for class ${name}`);
 
-          let returnType = 'void';
-          const returnTypeElement = operation.getElementsByTagName('ReturnType')[0];
-          if (returnTypeElement) {
-            returnType = resolveDataType(returnTypeElement);
+        for (let j = 0; j < operationElements.length; j++) {
+          const operationElement = operationElements[j];
+          const methodId = operationElement.getAttribute('Id') || generateId();
+          const methodName = operationElement.getAttribute('Name') || `method${j}`;
+          const visibility = (operationElement.getAttribute('Visibility') || 'public').toLowerCase();
+
+          // Skip invalid method names
+          if (!methodName || methodName.trim() === '') {
+            continue;
           }
 
+          console.log(`Processing operation: ${methodName} (${methodId})`);
+
+          // Extract return type
+          let returnType = 'void';
+          const returnTypeElement = operationElement.getElementsByTagName('ReturnType')[0];
+          if (returnTypeElement) {
+            const dataType = returnTypeElement.getElementsByTagName('DataType')[0];
+            const classType = returnTypeElement.getElementsByTagName('Class')[0];
+            if (dataType) {
+              returnType = dataType.getAttribute('Name') || 'void';
+            } else if (classType) {
+              returnType = classType.getAttribute('Name') || 'Object';
+            }
+          }
+
+          // Extract parameters from Visual Paradigm format
           const parameters: ParameterInfo[] = [];
-          const operationModelChildren = operation.getElementsByTagName('ModelChildren')[0];
-          
+          const operationModelChildren = operationElement.getElementsByTagName('ModelChildren')[0];
+
           if (operationModelChildren) {
             const paramElements = operationModelChildren.getElementsByTagName('Parameter');
-            
+
             for (let k = 0; k < paramElements.length; k++) {
               const paramElement = paramElements[k];
-              const paramName = paramElement.getAttribute('Name');
-              
-              if (!paramName) continue;
+              const paramName = paramElement.getAttribute('Name') || `param${k}`;
 
+              // Extract parameter type
               let paramType = 'Object';
-              const typeElement = paramElement.getElementsByTagName('Type')[0];
-              if (typeElement) {
-                paramType = resolveDataType(typeElement);
+              const paramTypeElement = paramElement.getElementsByTagName('Type')[0];
+              if (paramTypeElement) {
+                const dataType = paramTypeElement.getElementsByTagName('DataType')[0];
+                const classType = paramTypeElement.getElementsByTagName('Class')[0];
+                if (dataType) {
+                  paramType = dataType.getAttribute('Name') || 'Object';
+                } else if (classType) {
+                  paramType = classType.getAttribute('Name') || 'Object';
+                } else {
+                  // Fallback: try direct Type attribute
+                  paramType = paramElement.getAttribute('Type') || 'Object';
+                }
               }
 
               parameters.push({
@@ -929,39 +908,100 @@ export const processClassDiagramFile = async (file: File): Promise<ClassInfo[] |
           }
 
           methods.push({
-            id: generateId(),
+            id: methodId,
             name: methodName,
             returnType,
-            visibility: visibility.toLowerCase(),
+            visibility,
             parameters
           });
         }
       }
 
-      const compositeKey = `default.${className}`;
-      classesMap.set(compositeKey, {
-        id: generateId(),
-        name: className,
-        packageName: 'default',
-        methods,
-        relatedFunctions: []
-      });
+      // Check for duplicates using composite key
+      if (classesMap.has(compositeKey)) {
+        const existingClass = classesMap.get(compositeKey)!;
 
-      console.log(`Added direct class: ${compositeKey} with ${methods.length} methods`);
+        console.log(`Duplicate found for ${compositeKey}:`);
+        console.log(`  Existing: ${existingClass.methods.length} methods`);
+        console.log(`  New: ${methods.length} methods`);
+
+        // Merge strategy: Keep the most complete version
+        if (methods.length > existingClass.methods.length) {
+          // New version has more methods - replace
+          console.log(`  → Replacing with new version (more methods)`);
+          classesMap.set(compositeKey, {
+            id: existingClass.id, // Keep original ID for consistency
+            name,
+            packageName,
+            methods,
+            relatedFunctions: existingClass.relatedFunctions
+          });
+        } else if (methods.length === existingClass.methods.length && methods.length > 0) {
+          // Same number of methods - merge unique methods
+          console.log(`  → Merging methods`);
+          const methodMap = new Map<string, MethodInfo>();
+
+          // Add existing methods
+          existingClass.methods.forEach(method => {
+            const methodKey = `${method.name}(${method.parameters.map(p => p.type).join(',')})`;
+            methodMap.set(methodKey, method);
+          });
+
+          // Add new methods (will overwrite if same signature)
+          methods.forEach(method => {
+            const methodKey = `${method.name}(${method.parameters.map(p => p.type).join(',')})`;
+            methodMap.set(methodKey, method);
+          });
+
+          existingClass.methods = Array.from(methodMap.values());
+          console.log(`  → Merged result: ${existingClass.methods.length} methods`);
+        } else {
+          // Keep existing (it's better or same)
+          console.log(`  → Keeping existing version`);
+        }
+      } else {
+        // New unique class
+        if (methods.length > 0 || packageName !== 'default') {
+          // Only add if it has methods OR is in a specific package
+          classesMap.set(compositeKey, {
+            id: generateId(),
+            name,
+            packageName,
+            methods,
+            relatedFunctions: []
+          });
+          console.log(`Added new class: ${compositeKey} with ${methods.length} methods`);
+        } else {
+          console.log(`Skipping empty class: ${compositeKey}`);
+        }
+      }
     }
 
-    const classes = Array.from(classesMap.values());
-    
-    console.log('=== CLASS PROCESSING SUMMARY ===');
-    console.log(`Total classes processed: ${classes.length}`);
-    classes.forEach(cls => {
+    // Filter out classes that are clearly just references (no methods, default package)
+    const finalClasses = Array.from(classesMap.values()).filter(cls => {
+      const hasContent = cls.methods.length > 0 || cls.packageName !== 'default';
+      if (!hasContent) {
+        console.log(`Filtering out empty reference class: ${cls.packageName}.${cls.name}`);
+      }
+      return hasContent;
+    });
+
+    console.log('=== DEDUPLICATION SUMMARY ===');
+    console.log(`Original class elements: ${classElements.length}`);
+    console.log(`After deduplication: ${classesMap.size}`);
+    console.log(`After filtering: ${finalClasses.length}`);
+    console.log('Final unique classes:');
+    finalClasses.forEach(cls => {
       console.log(`  ${cls.packageName}.${cls.name} - ${cls.methods.length} methods`);
     });
 
+    const classes = finalClasses;
+    console.log('Processed class diagram after deduplication:', classes.length, 'unique classes');
+
     if (classes.length === 0) {
-      toast.warning('No classes found in the XML file');
+      toast.warning('No classes found in the Visual Paradigm XML file');
     } else {
-      toast.success(`Successfully processed ${classes.length} classes from class diagram`);
+      toast.success(`Successfully processed ${classes.length} unique classes`);
     }
 
     return classes;
@@ -1148,11 +1188,11 @@ export const generateStubCode = (cls: ClassInfo): string => {
   const packageLine = cls.packageName && cls.packageName !== 'default' ? `package ${cls.packageName};\n\n` : '';
 
   let code = `${packageLine}/**
-   * Enhanced Stub for ${cls.name}
-   * Generated on ${new Date().toISOString()}
-   * Features: Enhanced return values and console logging
-   */
-  public class ${cls.name}Stub {\n`;
+ * Enhanced Stub for ${cls.name}
+ * Generated on ${new Date().toISOString()}
+ * Features: Enhanced return values and console logging
+ */
+public class ${cls.name}Stub {\n`;
 
   // Add stub methods with enhanced return value generation
   if (cls.methods && cls.methods.length > 0) {
@@ -1294,16 +1334,16 @@ export const generateDriverCode = (cls: ClassInfo): string => {
   const packageLine = cls.packageName ? `package ${cls.packageName};\n\n` : '';
 
   let code = `${packageLine}import org.junit.Test;
-  import static org.junit.Assert.*;
+import static org.junit.Assert.*;
 
-  /**
-   * Test Driver for ${cls.name}
-   * Generated on ${new Date().toISOString()}
-   */
-  public class ${cls.name}Driver {
-      private ${cls.name} testObject = new ${cls.name}();
+/**
+ * Test Driver for ${cls.name}
+ * Generated on ${new Date().toISOString()}
+ */
+public class ${cls.name}Driver {
+    private ${cls.name} testObject = new ${cls.name}();
 
-  `;
+`;
 
   // Add test methods - ensure we have methods to test
   if (cls.methods && cls.methods.length > 0) {
@@ -1370,7 +1410,7 @@ export const generateDriverCode = (cls: ClassInfo): string => {
         }
 
         paramValues.push(param.name);
-        paramDeclarations.push(decl);
+        paramDeclarations.push(declaration);
       });
 
       // Add parameter declarations to code
@@ -1416,73 +1456,73 @@ export const generateDriverCode = (cls: ClassInfo): string => {
 // Helper function to generate basic stub when class definition is not available
 export const generateBasicStubCode = (className: string): string => {
   return `/**
-   * Basic Stub for ${className}
-   * Generated on ${new Date().toISOString()}
-   * Note: Class definition not found, this is a minimal stub
-   */
-  public class ${className}Stub {
-      
-      public ${className}Stub() {
-          // Default constructor
-          System.out.println("${className}Stub created");
-      }
-      
-      // Add commonly expected methods based on class name
-      ${generateCommonMethodsForClass(className)}
-      
-      // Generic method to handle any calls
-      public Object handleCall(String methodName, Object... args) {
-          System.out.println("Stub method called: " + methodName + " on ${className}Stub");
-          return null;
-      }
-  }
-  `;
+ * Basic Stub for ${className}
+ * Generated on ${new Date().toISOString()}
+ * Note: Class definition not found, this is a minimal stub
+ */
+public class ${className}Stub {
+    
+    public ${className}Stub() {
+        // Default constructor
+        System.out.println("${className}Stub created");
+    }
+    
+    // Add commonly expected methods based on class name
+    ${generateCommonMethodsForClass(className)}
+    
+    // Generic method to handle any calls
+    public Object handleCall(String methodName, Object... args) {
+        System.out.println("Stub method called: " + methodName + " on ${className}Stub");
+        return null;
+    }
+}
+`;
 };
 
 // Helper function to generate basic driver when class definition is not available
 export const generateBasicDriverCode = (driverClassName: string, targetClassName: string): string => {
   return `import org.junit.Test;
-  import static org.junit.Assert.*;
+import static org.junit.Assert.*;
 
-  /**
-   * Basic Driver for ${driverClassName}
-   * Generated on ${new Date().toISOString()}
-   * Note: Class definition not found, this is a minimal driver
-   */
-  public class ${driverClassName}Driver {
-      
-      private ${targetClassName} targetObject;
-      
-      public void setUp() {
-          targetObject = new ${targetClassName}();
-      }
-      
-      @Test
-      public void testBasicInteraction() {
-          setUp();
-          
-          // Basic test to verify the target object can be created and interacted with
-          assertNotNull(targetObject);
-          System.out.println("${driverClassName}Driver successfully created ${targetClassName} object");
-          
-          // TODO: Add specific test methods based on your requirements
-          // This driver was generated because ${driverClassName} calls ${targetClassName}
-      }
-      
-      @Test
-      public void testDriverFunctionality() {
-          setUp();
-          
-          // Test that demonstrates ${driverClassName} can drive ${targetClassName}
-          try {
-              // TODO: Implement specific driver logic here
-              System.out.println("Driver test completed successfully");
-          } catch (Exception e) {
-              fail("Driver test failed: " + e.getMessage());
-          }
-      }
-  }
-  `;
+/**
+ * Basic Driver for ${driverClassName}
+ * Generated on ${new Date().toISOString()}
+ * Note: Class definition not found, this is a minimal driver
+ */
+public class ${driverClassName}Driver {
+    
+    private ${targetClassName} targetObject;
+    
+    public void setUp() {
+        targetObject = new ${targetClassName}();
+    }
+    
+    @Test
+    public void testBasicInteraction() {
+        setUp();
+        
+        // Basic test to verify the target object can be created and interacted with
+        assertNotNull(targetObject);
+        System.out.println("${driverClassName}Driver successfully created ${targetClassName} object");
+        
+        // TODO: Add specific test methods based on your requirements
+        // This driver was generated because ${driverClassName} calls ${targetClassName}
+    }
+    
+    @Test
+    public void testDriverFunctionality() {
+        setUp();
+        
+        // Test that demonstrates ${driverClassName} can drive ${targetClassName}
+        try {
+            // TODO: Implement specific driver logic here
+            System.out.println("Driver test completed successfully");
+        } catch (Exception e) {
+            fail("Driver test failed: " + e.getMessage());
+        }
+    }
+}
+`;
 };
 
 // Helper function to generate common methods based on class name patterns
@@ -1645,17 +1685,17 @@ export const generateServiceStubCode = (serviceClassName: string): string => {
   };
 
   return `/**
-   * Service Stub for ${serviceClassName}
-   * Generated on ${new Date().toISOString()}
-   * This stub was created based on REF box operations in sequence diagrams
-   */
-  public class ${serviceClassName}Stub {
-      
-      public ${serviceClassName}Stub() {
-          System.out.println("${serviceClassName}Stub created");
-      }
-      
-      ${generateServiceMethods(serviceClassName)}
-  }
-  `;
+ * Service Stub for ${serviceClassName}
+ * Generated on ${new Date().toISOString()}
+ * This stub was created based on REF box operations in sequence diagrams
+ */
+public class ${serviceClassName}Stub {
+    
+    public ${serviceClassName}Stub() {
+        System.out.println("${serviceClassName}Stub created");
+    }
+    
+    ${generateServiceMethods(serviceClassName)}
+}
+`;
 };
