@@ -773,7 +773,7 @@ export const processSequenceDiagramFile = async (file: File): Promise<SequenceDi
   }
 };
 
-// Process uploaded Class Diagram file with improved deduplication
+// Process uploaded Class Diagram file with improved handling for your XML format
 export const processClassDiagramFile = async (file: File): Promise<ClassInfo[] | null> => {
   try {
     const content = await readFileAsText(file);
@@ -787,117 +787,248 @@ export const processClassDiagramFile = async (file: File): Promise<ClassInfo[] |
       return null;
     }
 
-    console.log('Parsing Visual Paradigm class diagram XML...');
+    console.log('Parsing class diagram XML...');
 
-    // Check for Visual Paradigm structure
+    // Check for Project element (your XML structure)
     const projectElement = xmlDoc.getElementsByTagName('Project')[0];
-    if (!projectElement || projectElement.getAttribute('Xml_structure') !== 'simple') {
-      console.error('Not a valid Visual Paradigm XML file');
-      toast.error('Invalid Visual Paradigm XML format');
+    if (!projectElement) {
+      console.error('Not a valid XML file - no Project element');
+      toast.error('Invalid XML format - no Project element found');
       return null;
     }
 
-    // Extract classes from Visual Paradigm format
+    // Extract classes from your XML format
     const modelsElement = xmlDoc.getElementsByTagName('Models')[0];
     if (!modelsElement) {
       console.error('No Models element found in XML');
-      toast.error('Invalid Visual Paradigm XML format - no Models element');
+      toast.error('Invalid XML format - no Models element');
       return null;
     }
 
-    // Get all Class elements under Models (including nested in packages)
-    const classElements = modelsElement.getElementsByTagName('Class');
-    const classesMap = new Map<string, ClassInfo>(); // Use composite key for deduplication
+    console.log('Found Models element, processing classes...');
 
-    console.log(`Found ${classElements.length} class elements`);
-
-    for (let i = 0; i < classElements.length; i++) {
-      const classElement = classElements[i];
-      const xmlId = classElement.getAttribute('Id') || generateId();
-      const name = classElement.getAttribute('Name') || `Class${i}`;
-
-      // Skip classes with empty or invalid names
-      if (!name || name.trim() === '' || name === 'Class' || name.startsWith('Class')) {
-        console.log(`Skipping invalid class name: ${name}`);
-        continue;
+    // Create a map to resolve DataType references
+    const dataTypeMap = new Map<string, string>();
+    const dataTypes = modelsElement.getElementsByTagName('DataType');
+    for (let i = 0; i < dataTypes.length; i++) {
+      const dataType = dataTypes[i];
+      const id = dataType.getAttribute('Id');
+      const name = dataType.getAttribute('Name');
+      if (id && name) {
+        dataTypeMap.set(id, name);
       }
+    }
+    console.log(`Found ${dataTypeMap.size} data type mappings`);
 
-      // Extract package name
-      let packageName = 'default';
-      let parentElement = classElement.parentElement;
-      while (parentElement && parentElement.tagName !== 'Models') {
-        if (parentElement.tagName === 'Package') {
-          packageName = parentElement.getAttribute('Name') || 'default';
+    // Helper function to resolve data type references
+    const resolveDataType = (element: Element): string => {
+      if (!element) return 'Object';
+      
+      // Check for direct DataType with Idref
+      const dataTypeElement = element.getElementsByTagName('DataType')[0];
+      if (dataTypeElement) {
+        const idref = dataTypeElement.getAttribute('Idref');
+        const name = dataTypeElement.getAttribute('Name');
+        
+        if (idref && dataTypeMap.has(idref)) {
+          return dataTypeMap.get(idref)!;
+        } else if (name) {
+          return name;
+        }
+      }
+      
+      return 'Object';
+    };
+
+    const classesMap = new Map<string, ClassInfo>();
+
+    // Process packages and their classes
+    const packages = modelsElement.getElementsByTagName('Package');
+    console.log(`Found ${packages.length} packages`);
+
+    for (let i = 0; i < packages.length; i++) {
+      const packageElement = packages[i];
+      const packageName = packageElement.getAttribute('Name') || 'default';
+      
+      console.log(`Processing package: ${packageName}`);
+
+      const modelChildren = packageElement.getElementsByTagName('ModelChildren')[0];
+      if (!modelChildren) continue;
+
+      const classElements = modelChildren.getElementsByTagName('Class');
+      console.log(`Found ${classElements.length} classes in package ${packageName}`);
+
+      for (let j = 0; j < classElements.length; j++) {
+        const classElement = classElements[j];
+        const className = classElement.getAttribute('Name');
+        const classId = classElement.getAttribute('Id') || generateId();
+
+        if (!className || className.trim() === '') {
+          console.log('Skipping class with empty name');
+          continue;
+        }
+
+        console.log(`Processing class: ${className} in package: ${packageName}`);
+
+        const methods: MethodInfo[] = [];
+        const classModelChildren = classElement.getElementsByTagName('ModelChildren')[0];
+
+        if (classModelChildren) {
+          const operations = classModelChildren.getElementsByTagName('Operation');
+          console.log(`Found ${operations.length} operations for class ${className}`);
+
+          for (let k = 0; k < operations.length; k++) {
+            const operation = operations[k];
+            const methodName = operation.getAttribute('Name');
+            const visibility = operation.getAttribute('Visibility') || 'public';
+
+            if (!methodName || methodName.trim() === '') {
+              continue;
+            }
+
+            console.log(`Processing operation: ${methodName}`);
+
+            // Get return type
+            let returnType = 'void';
+            const returnTypeElement = operation.getElementsByTagName('ReturnType')[0];
+            if (returnTypeElement) {
+              returnType = resolveDataType(returnTypeElement);
+            }
+
+            // Get parameters
+            const parameters: ParameterInfo[] = [];
+            const operationModelChildren = operation.getElementsByTagName('ModelChildren')[0];
+            
+            if (operationModelChildren) {
+              const paramElements = operationModelChildren.getElementsByTagName('Parameter');
+              
+              for (let l = 0; l < paramElements.length; l++) {
+                const paramElement = paramElements[l];
+                const paramName = paramElement.getAttribute('Name');
+                
+                if (!paramName) continue;
+
+                // Get parameter type
+                let paramType = 'Object';
+                const typeElement = paramElement.getElementsByTagName('Type')[0];
+                if (typeElement) {
+                  paramType = resolveDataType(typeElement);
+                }
+
+                parameters.push({
+                  name: paramName,
+                  type: paramType
+                });
+              }
+            }
+
+            methods.push({
+              id: generateId(),
+              name: methodName,
+              returnType,
+              visibility: visibility.toLowerCase(),
+              parameters
+            });
+          }
+        }
+
+        // Create composite key for deduplication
+        const compositeKey = `${packageName}.${className}`;
+
+        // Check for duplicates
+        if (classesMap.has(compositeKey)) {
+          const existingClass = classesMap.get(compositeKey)!;
+          console.log(`Duplicate found for ${compositeKey}, merging methods`);
+          
+          // Merge methods
+          const methodMap = new Map<string, MethodInfo>();
+          
+          // Add existing methods
+          existingClass.methods.forEach(method => {
+            const methodKey = `${method.name}(${method.parameters.map(p => p.type).join(',')})`;
+            methodMap.set(methodKey, method);
+          });
+          
+          // Add new methods
+          methods.forEach(method => {
+            const methodKey = `${method.name}(${method.parameters.map(p => p.type).join(',')})`;
+            methodMap.set(methodKey, method);
+          });
+          
+          existingClass.methods = Array.from(methodMap.values());
+        } else {
+          // New class
+          classesMap.set(compositeKey, {
+            id: generateId(),
+            name: className,
+            packageName,
+            methods,
+            relatedFunctions: []
+          });
+        }
+
+        console.log(`Added class: ${compositeKey} with ${methods.length} methods`);
+      }
+    }
+
+    // Also check for classes directly under Models (not in packages)
+    const directClasses = modelsElement.getElementsByTagName('Class');
+    for (let i = 0; i < directClasses.length; i++) {
+      const classElement = directClasses[i];
+      
+      // Skip if this class is already processed (inside a package)
+      let isInPackage = false;
+      let parent = classElement.parentElement;
+      while (parent && parent !== modelsElement) {
+        if (parent.tagName === 'Package') {
+          isInPackage = true;
           break;
         }
-        parentElement = parentElement.parentElement;
+        parent = parent.parentElement;
       }
+      
+      if (isInPackage) continue;
 
-      // Create composite key: package.className
-      const compositeKey = `${packageName}.${name}`;
+      const className = classElement.getAttribute('Name');
+      if (!className || className.trim() === '') continue;
 
-      console.log(`Processing class: ${name} (${xmlId}) in package: ${packageName}`);
+      console.log(`Processing direct class: ${className}`);
 
-      // Extract operations (methods) from Visual Paradigm format
-      const modelChildren = classElement.getElementsByTagName('ModelChildren')[0];
       const methods: MethodInfo[] = [];
+      const classModelChildren = classElement.getElementsByTagName('ModelChildren')[0];
 
-      if (modelChildren) {
-        const operationElements = modelChildren.getElementsByTagName('Operation');
+      if (classModelChildren) {
+        const operations = classModelChildren.getElementsByTagName('Operation');
+        
+        for (let j = 0; j < operations.length; j++) {
+          const operation = operations[j];
+          const methodName = operation.getAttribute('Name');
+          const visibility = operation.getAttribute('Visibility') || 'public';
 
-        console.log(`Found ${operationElements.length} operations for class ${name}`);
+          if (!methodName) continue;
 
-        for (let j = 0; j < operationElements.length; j++) {
-          const operationElement = operationElements[j];
-          const methodId = operationElement.getAttribute('Id') || generateId();
-          const methodName = operationElement.getAttribute('Name') || `method${j}`;
-          const visibility = (operationElement.getAttribute('Visibility') || 'public').toLowerCase();
-
-          // Skip invalid method names
-          if (!methodName || methodName.trim() === '') {
-            continue;
-          }
-
-          console.log(`Processing operation: ${methodName} (${methodId})`);
-
-          // Extract return type
           let returnType = 'void';
-          const returnTypeElement = operationElement.getElementsByTagName('ReturnType')[0];
+          const returnTypeElement = operation.getElementsByTagName('ReturnType')[0];
           if (returnTypeElement) {
-            const dataType = returnTypeElement.getElementsByTagName('DataType')[0];
-            const classType = returnTypeElement.getElementsByTagName('Class')[0];
-            if (dataType) {
-              returnType = dataType.getAttribute('Name') || 'void';
-            } else if (classType) {
-              returnType = classType.getAttribute('Name') || 'Object';
-            }
+            returnType = resolveDataType(returnTypeElement);
           }
 
-          // Extract parameters from Visual Paradigm format
           const parameters: ParameterInfo[] = [];
-          const operationModelChildren = operationElement.getElementsByTagName('ModelChildren')[0];
-
+          const operationModelChildren = operation.getElementsByTagName('ModelChildren')[0];
+          
           if (operationModelChildren) {
             const paramElements = operationModelChildren.getElementsByTagName('Parameter');
-
+            
             for (let k = 0; k < paramElements.length; k++) {
               const paramElement = paramElements[k];
-              const paramName = paramElement.getAttribute('Name') || `param${k}`;
+              const paramName = paramElement.getAttribute('Name');
+              
+              if (!paramName) continue;
 
-              // Extract parameter type
               let paramType = 'Object';
-              const paramTypeElement = paramElement.getElementsByTagName('Type')[0];
-              if (paramTypeElement) {
-                const dataType = paramTypeElement.getElementsByTagName('DataType')[0];
-                const classType = paramTypeElement.getElementsByTagName('Class')[0];
-                if (dataType) {
-                  paramType = dataType.getAttribute('Name') || 'Object';
-                } else if (classType) {
-                  paramType = classType.getAttribute('Name') || 'Object';
-                } else {
-                  // Fallback: try direct Type attribute
-                  paramType = paramElement.getAttribute('Type') || 'Object';
-                }
+              const typeElement = paramElement.getElementsByTagName('Type')[0];
+              if (typeElement) {
+                paramType = resolveDataType(typeElement);
               }
 
               parameters.push({
@@ -908,100 +1039,39 @@ export const processClassDiagramFile = async (file: File): Promise<ClassInfo[] |
           }
 
           methods.push({
-            id: methodId,
+            id: generateId(),
             name: methodName,
             returnType,
-            visibility,
+            visibility: visibility.toLowerCase(),
             parameters
           });
         }
       }
 
-      // Check for duplicates using composite key
-      if (classesMap.has(compositeKey)) {
-        const existingClass = classesMap.get(compositeKey)!;
+      const compositeKey = `default.${className}`;
+      classesMap.set(compositeKey, {
+        id: generateId(),
+        name: className,
+        packageName: 'default',
+        methods,
+        relatedFunctions: []
+      });
 
-        console.log(`Duplicate found for ${compositeKey}:`);
-        console.log(`  Existing: ${existingClass.methods.length} methods`);
-        console.log(`  New: ${methods.length} methods`);
-
-        // Merge strategy: Keep the most complete version
-        if (methods.length > existingClass.methods.length) {
-          // New version has more methods - replace
-          console.log(`  → Replacing with new version (more methods)`);
-          classesMap.set(compositeKey, {
-            id: existingClass.id, // Keep original ID for consistency
-            name,
-            packageName,
-            methods,
-            relatedFunctions: existingClass.relatedFunctions
-          });
-        } else if (methods.length === existingClass.methods.length && methods.length > 0) {
-          // Same number of methods - merge unique methods
-          console.log(`  → Merging methods`);
-          const methodMap = new Map<string, MethodInfo>();
-
-          // Add existing methods
-          existingClass.methods.forEach(method => {
-            const methodKey = `${method.name}(${method.parameters.map(p => p.type).join(',')})`;
-            methodMap.set(methodKey, method);
-          });
-
-          // Add new methods (will overwrite if same signature)
-          methods.forEach(method => {
-            const methodKey = `${method.name}(${method.parameters.map(p => p.type).join(',')})`;
-            methodMap.set(methodKey, method);
-          });
-
-          existingClass.methods = Array.from(methodMap.values());
-          console.log(`  → Merged result: ${existingClass.methods.length} methods`);
-        } else {
-          // Keep existing (it's better or same)
-          console.log(`  → Keeping existing version`);
-        }
-      } else {
-        // New unique class
-        if (methods.length > 0 || packageName !== 'default') {
-          // Only add if it has methods OR is in a specific package
-          classesMap.set(compositeKey, {
-            id: generateId(),
-            name,
-            packageName,
-            methods,
-            relatedFunctions: []
-          });
-          console.log(`Added new class: ${compositeKey} with ${methods.length} methods`);
-        } else {
-          console.log(`Skipping empty class: ${compositeKey}`);
-        }
-      }
+      console.log(`Added direct class: ${compositeKey} with ${methods.length} methods`);
     }
 
-    // Filter out classes that are clearly just references (no methods, default package)
-    const finalClasses = Array.from(classesMap.values()).filter(cls => {
-      const hasContent = cls.methods.length > 0 || cls.packageName !== 'default';
-      if (!hasContent) {
-        console.log(`Filtering out empty reference class: ${cls.packageName}.${cls.name}`);
-      }
-      return hasContent;
-    });
-
-    console.log('=== DEDUPLICATION SUMMARY ===');
-    console.log(`Original class elements: ${classElements.length}`);
-    console.log(`After deduplication: ${classesMap.size}`);
-    console.log(`After filtering: ${finalClasses.length}`);
-    console.log('Final unique classes:');
-    finalClasses.forEach(cls => {
+    const classes = Array.from(classesMap.values());
+    
+    console.log('=== CLASS PROCESSING SUMMARY ===');
+    console.log(`Total classes processed: ${classes.length}`);
+    classes.forEach(cls => {
       console.log(`  ${cls.packageName}.${cls.name} - ${cls.methods.length} methods`);
     });
 
-    const classes = finalClasses;
-    console.log('Processed class diagram after deduplication:', classes.length, 'unique classes');
-
     if (classes.length === 0) {
-      toast.warning('No classes found in the Visual Paradigm XML file');
+      toast.warning('No classes found in the XML file');
     } else {
-      toast.success(`Successfully processed ${classes.length} unique classes`);
+      toast.success(`Successfully processed ${classes.length} classes from class diagram`);
     }
 
     return classes;
@@ -1188,11 +1258,11 @@ export const generateStubCode = (cls: ClassInfo): string => {
   const packageLine = cls.packageName && cls.packageName !== 'default' ? `package ${cls.packageName};\n\n` : '';
 
   let code = `${packageLine}/**
- * Enhanced Stub for ${cls.name}
- * Generated on ${new Date().toISOString()}
- * Features: Enhanced return values and console logging
- */
-public class ${cls.name}Stub {\n`;
+   * Enhanced Stub for ${cls.name}
+   * Generated on ${new Date().toISOString()}
+   * Features: Enhanced return values and console logging
+   */
+  public class ${cls.name}Stub {\n`;
 
   // Add stub methods with enhanced return value generation
   if (cls.methods && cls.methods.length > 0) {
@@ -1334,16 +1404,16 @@ export const generateDriverCode = (cls: ClassInfo): string => {
   const packageLine = cls.packageName ? `package ${cls.packageName};\n\n` : '';
 
   let code = `${packageLine}import org.junit.Test;
-import static org.junit.Assert.*;
+  import static org.junit.Assert.*;
 
-/**
- * Test Driver for ${cls.name}
- * Generated on ${new Date().toISOString()}
- */
-public class ${cls.name}Driver {
-    private ${cls.name} testObject = new ${cls.name}();
+  /**
+   * Test Driver for ${cls.name}
+   * Generated on ${new Date().toISOString()}
+   */
+  public class ${cls.name}Driver {
+      private ${cls.name} testObject = new ${cls.name}();
 
-`;
+  `;
 
   // Add test methods - ensure we have methods to test
   if (cls.methods && cls.methods.length > 0) {
@@ -1456,73 +1526,73 @@ public class ${cls.name}Driver {
 // Helper function to generate basic stub when class definition is not available
 export const generateBasicStubCode = (className: string): string => {
   return `/**
- * Basic Stub for ${className}
- * Generated on ${new Date().toISOString()}
- * Note: Class definition not found, this is a minimal stub
- */
-public class ${className}Stub {
-    
-    public ${className}Stub() {
-        // Default constructor
-        System.out.println("${className}Stub created");
-    }
-    
-    // Add commonly expected methods based on class name
-    ${generateCommonMethodsForClass(className)}
-    
-    // Generic method to handle any calls
-    public Object handleCall(String methodName, Object... args) {
-        System.out.println("Stub method called: " + methodName + " on ${className}Stub");
-        return null;
-    }
-}
-`;
+   * Basic Stub for ${className}
+   * Generated on ${new Date().toISOString()}
+   * Note: Class definition not found, this is a minimal stub
+   */
+  public class ${className}Stub {
+      
+      public ${className}Stub() {
+          // Default constructor
+          System.out.println("${className}Stub created");
+      }
+      
+      // Add commonly expected methods based on class name
+      ${generateCommonMethodsForClass(className)}
+      
+      // Generic method to handle any calls
+      public Object handleCall(String methodName, Object... args) {
+          System.out.println("Stub method called: " + methodName + " on ${className}Stub");
+          return null;
+      }
+  }
+  `;
 };
 
 // Helper function to generate basic driver when class definition is not available
 export const generateBasicDriverCode = (driverClassName: string, targetClassName: string): string => {
   return `import org.junit.Test;
-import static org.junit.Assert.*;
+  import static org.junit.Assert.*;
 
-/**
- * Basic Driver for ${driverClassName}
- * Generated on ${new Date().toISOString()}
- * Note: Class definition not found, this is a minimal driver
- */
-public class ${driverClassName}Driver {
-    
-    private ${targetClassName} targetObject;
-    
-    public void setUp() {
-        targetObject = new ${targetClassName}();
-    }
-    
-    @Test
-    public void testBasicInteraction() {
-        setUp();
-        
-        // Basic test to verify the target object can be created and interacted with
-        assertNotNull(targetObject);
-        System.out.println("${driverClassName}Driver successfully created ${targetClassName} object");
-        
-        // TODO: Add specific test methods based on your requirements
-        // This driver was generated because ${driverClassName} calls ${targetClassName}
-    }
-    
-    @Test
-    public void testDriverFunctionality() {
-        setUp();
-        
-        // Test that demonstrates ${driverClassName} can drive ${targetClassName}
-        try {
-            // TODO: Implement specific driver logic here
-            System.out.println("Driver test completed successfully");
-        } catch (Exception e) {
-            fail("Driver test failed: " + e.getMessage());
-        }
-    }
-}
-`;
+  /**
+   * Basic Driver for ${driverClassName}
+   * Generated on ${new Date().toISOString()}
+   * Note: Class definition not found, this is a minimal driver
+   */
+  public class ${driverClassName}Driver {
+      
+      private ${targetClassName} targetObject;
+      
+      public void setUp() {
+          targetObject = new ${targetClassName}();
+      }
+      
+      @Test
+      public void testBasicInteraction() {
+          setUp();
+          
+          // Basic test to verify the target object can be created and interacted with
+          assertNotNull(targetObject);
+          System.out.println("${driverClassName}Driver successfully created ${targetClassName} object");
+          
+          // TODO: Add specific test methods based on your requirements
+          // This driver was generated because ${driverClassName} calls ${targetClassName}
+      }
+      
+      @Test
+      public void testDriverFunctionality() {
+          setUp();
+          
+          // Test that demonstrates ${driverClassName} can drive ${targetClassName}
+          try {
+              // TODO: Implement specific driver logic here
+              System.out.println("Driver test completed successfully");
+          } catch (Exception e) {
+              fail("Driver test failed: " + e.getMessage());
+          }
+      }
+  }
+  `;
 };
 
 // Helper function to generate common methods based on class name patterns
@@ -1685,17 +1755,17 @@ export const generateServiceStubCode = (serviceClassName: string): string => {
   };
 
   return `/**
- * Service Stub for ${serviceClassName}
- * Generated on ${new Date().toISOString()}
- * This stub was created based on REF box operations in sequence diagrams
- */
-public class ${serviceClassName}Stub {
-    
-    public ${serviceClassName}Stub() {
-        System.out.println("${serviceClassName}Stub created");
-    }
-    
-    ${generateServiceMethods(serviceClassName)}
-}
-`;
+   * Service Stub for ${serviceClassName}
+   * Generated on ${new Date().toISOString()}
+   * This stub was created based on REF box operations in sequence diagrams
+   */
+  public class ${serviceClassName}Stub {
+      
+      public ${serviceClassName}Stub() {
+          System.out.println("${serviceClassName}Stub created");
+      }
+      
+      ${generateServiceMethods(serviceClassName)}
+  }
+  `;
 };
