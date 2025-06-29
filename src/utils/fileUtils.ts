@@ -42,15 +42,85 @@ export const readFileAsText = (file: File): Promise<string> => {
   });
 };
 
+// Enhanced CSV parser to handle special characters, quotes, and commas
+const parseCSVLine = (line: string): string[] => {
+  const result: string[] = [];
+  let current = '';
+  let inQuotes = false;
+  let i = 0;
+
+  while (i < line.length) {
+    const char = line[i];
+    const nextChar = line[i + 1];
+
+    if (char === '"') {
+      if (inQuotes && nextChar === '"') {
+        // Escaped quote
+        current += '"';
+        i += 2;
+      } else {
+        // Toggle quote state
+        inQuotes = !inQuotes;
+        i++;
+      }
+    } else if (char === ',' && !inQuotes) {
+      // Field separator
+      result.push(current.trim());
+      current = '';
+      i++;
+    } else {
+      current += char;
+      i++;
+    }
+  }
+
+  // Add the last field
+  result.push(current.trim());
+  return result;
+};
+
+// Enhanced CSV parser for the entire content
+const parseCSVContent = (content: string): string[][] => {
+  const lines = content.split(/\r?\n/);
+  const result: string[][] = [];
+
+  for (let i = 0; i < lines.length; i++) {
+    const line = lines[i].trim();
+    if (line) {
+      try {
+        const fields = parseCSVLine(line);
+        result.push(fields);
+      } catch (error) {
+        console.warn(`Error parsing CSV line ${i + 1}: ${line}`, error);
+        // Fallback to simple split for malformed lines
+        result.push(line.split(',').map(field => field.trim().replace(/^["']|["']$/g, '')));
+      }
+    }
+  }
+
+  return result;
+};
+
 // Helper function to clean and split sequence diagram names
 const cleanAndSplitDiagramNames = (diagramString: string): string[] => {
   if (!diagramString) return [];
 
   console.log('Processing diagram string:', diagramString);
 
-  // Split by comma and clean each diagram name
+  // Handle various separators: comma, semicolon, pipe
+  const separators = [',', ';', '|'];
+  let separator = ',';
+  
+  for (const sep of separators) {
+    if (diagramString.includes(sep)) {
+      separator = sep;
+      break;
+    }
+  }
+
+  // Split by separator and clean each diagram name
   const diagrams = diagramString
-    .split(',')
+    .split(separator)
     .map(name => {
       // Remove leading and trailing whitespace
       let cleaned = name.trim();
@@ -58,6 +128,8 @@ const cleanAndSplitDiagramNames = (diagramString: string): string[] => {
       cleaned = cleaned.replace(/^["']|["']$/g, '');
       // Remove any remaining whitespace
       cleaned = cleaned.trim();
+      // Remove special characters that might interfere with file matching
+      cleaned = cleaned.replace(/[^\w\s\-\.]/g, '');
       return cleaned;
     })
     .filter(name => name.length > 0);
@@ -66,30 +138,71 @@ const cleanAndSplitDiagramNames = (diagramString: string): string[] => {
   return diagrams;
 };
 
-// Process uploaded RTM file
+// Enhanced column matching with your specific requirements
+const findBestColumnMatch = (headers: string[], possibleNames: string[]): number => {
+  console.log('Finding column match for:', possibleNames);
+  console.log('Available headers:', headers);
+
+  // Normalize headers for matching
+  const normalizedHeaders = headers.map(h => h.toLowerCase().replace(/[^a-z0-9]/g, ''));
+  
+  // Try exact match first
+  for (const name of possibleNames) {
+    const normalizedName = name.toLowerCase().replace(/[^a-z0-9]/g, '');
+    const exactIndex = normalizedHeaders.indexOf(normalizedName);
+    if (exactIndex !== -1) {
+      console.log(`Found exact match: "${headers[exactIndex]}" for "${name}"`);
+      return exactIndex;
+    }
+  }
+
+  // Try partial match - check if any possible name is contained in headers
+  for (const name of possibleNames) {
+    const normalizedName = name.toLowerCase().replace(/[^a-z0-9]/g, '');
+    for (let i = 0; i < normalizedHeaders.length; i++) {
+      if (normalizedHeaders[i].includes(normalizedName) || normalizedName.includes(normalizedHeaders[i])) {
+        console.log(`Found partial match: "${headers[i]}" contains "${name}"`);
+        return i;
+      }
+    }
+  }
+
+  // Try fuzzy match - check if headers contain any of the possible names
+  for (let i = 0; i < headers.length; i++) {
+    const header = headers[i].toLowerCase();
+    for (const name of possibleNames) {
+      if (header.includes(name.toLowerCase()) || name.toLowerCase().includes(header)) {
+        console.log(`Found fuzzy match: "${headers[i]}" matches "${name}"`);
+        return i;
+      }
+    }
+  }
+
+  console.log('No match found for:', possibleNames);
+  return -1;
+};
+
+// Process uploaded RTM file with enhanced CSV parsing
 export const processRTMFile = async (file: File): Promise<SystemFunction[]> => {
   try {
     const content = await readFileAsText(file);
-    const lines = content.split('\n');
+    const csvData = parseCSVContent(content);
 
-    if (lines.length < 2) {
+    if (csvData.length < 2) {
       toast.error('RTM file is empty or has no data rows');
       return [];
     }
 
-    // Skip header line and process each row
-    const systemFunctions: SystemFunction[] = [];
-    const header = lines[0].split(',').map(col => col.trim().toLowerCase());
+    const header = csvData[0];
+    console.log('RTM file header:', header);
 
-    console.log('RTM file header:', header); // Debug the headers
-
-    // Find column indices with flexible matching
-    const possibleFnIdColumns = ['functional requirement', 'requirement id', 'req id', 'req_id', 'requirementid', 'id', 'requirement'];
-    const possibleFnNameColumns = ['functional requirement', 'system function', 'function', 'function name', 'systemfunction', 'name', 'description'];
-    const possibleSeqDiagramColumns = ['sequencediagram', 'sequence diagram', 'seq diagram', 'sequencediagram', 'diagram', 'sequence'];
+    // Enhanced column name matching with your requirements
+    const possibleFnIdColumns = ['functional requirement', 'requirement id', 'req id', 'req_id', 'requirementid', 'id', 'requirement', 'function', 'functional', 'fr'];
+    const possibleFnNameColumns = ['functional requirement', 'system function', 'function', 'function name', 'systemfunction', 'name', 'description', 'functional'];
+    const possibleSeqDiagramColumns = ['sequence', 'sequencediagram', 'sequence diagram', 'seq diagram', 'diagram', 'sd'];
     const possibleRelatedSeqDiagramColumns = ['related sequence diagram', 'related diagram', 'relateddiagram', 'additional diagrams'];
 
-    // Find best match for each required column
+    // Find best match for each column
     const fnIdIndex = findBestColumnMatch(header, possibleFnIdColumns);
     const fnNameIndex = findBestColumnMatch(header, possibleFnNameColumns);
     const seqDiagramIndex = findBestColumnMatch(header, possibleSeqDiagramColumns);
@@ -97,33 +210,67 @@ export const processRTMFile = async (file: File): Promise<SystemFunction[]> => {
 
     console.log('Column indices:', { fnIdIndex, fnNameIndex, seqDiagramIndex, relatedSeqDiagramIndex });
 
-    // Check if we found the minimum required columns
-    if (fnIdIndex === -1 || fnNameIndex === -1) {
-      toast.error('Required columns not found in RTM file. Please ensure your CSV has columns for Requirement ID and System Function.');
+    // Handle case where ID and function name might be in the same column
+    let effectiveFnIdIndex = fnIdIndex;
+    let effectiveFnNameIndex = fnNameIndex;
+
+    if (fnIdIndex === -1 && fnNameIndex !== -1) {
+      // Use function name column for both ID and name
+      effectiveFnIdIndex = fnNameIndex;
+      console.log('Using function name column for both ID and name');
+    } else if (fnNameIndex === -1 && fnIdIndex !== -1) {
+      // Use ID column for both ID and name
+      effectiveFnNameIndex = fnIdIndex;
+      console.log('Using ID column for both ID and name');
+    }
+
+    // Check if we found at least one required column
+    if (effectiveFnIdIndex === -1 && effectiveFnNameIndex === -1) {
+      toast.error('Required columns not found in RTM file. Please ensure your CSV has columns containing "function", "functional", "FR", or "requirement".');
       return [];
     }
 
     // Even if sequence diagram column is missing, we can still process the file
     const hasSeqDiagram = seqDiagramIndex !== -1;
     if (!hasSeqDiagram) {
-      toast.warning('Sequence diagram column not found. Some features may be limited.');
+      toast.warning('Sequence diagram column not found. Looking for columns containing "sequence", "SD", or "diagram".');
     }
 
-    for (let i = 1; i < lines.length; i++) {
-      if (!lines[i].trim()) continue;
+    const systemFunctions: SystemFunction[] = [];
 
-      const columns = lines[i].split(',').map(col => col.trim());
+    // Process each data row
+    for (let i = 1; i < csvData.length; i++) {
+      const columns = csvData[i];
 
-      if (columns.length < Math.max(fnIdIndex, fnNameIndex) + 1) {
-        console.warn(`Line ${i} has fewer columns than expected`);
-        continue;
+      if (columns.length === 0) continue;
+
+      // Get function ID and name with fallback logic
+      let functionId = '';
+      let functionName = '';
+
+      if (effectiveFnIdIndex !== -1 && columns.length > effectiveFnIdIndex) {
+        functionId = columns[effectiveFnIdIndex].trim();
       }
 
-      const functionId = columns[fnIdIndex].trim();
-      const functionName = columns[fnNameIndex].trim();
+      if (effectiveFnNameIndex !== -1 && columns.length > effectiveFnNameIndex) {
+        functionName = columns[effectiveFnNameIndex].trim();
+      }
+
+      // If we only have one column, use it for both ID and name
+      if (!functionId && !functionName) {
+        if (columns.length > 0) {
+          const combined = columns[0].trim();
+          functionId = combined;
+          functionName = combined;
+        }
+      } else if (!functionId) {
+        functionId = functionName;
+      } else if (!functionName) {
+        functionName = functionId;
+      }
 
       if (!functionId || !functionName) {
-        console.warn(`Line ${i} has empty required values`);
+        console.warn(`Row ${i + 1} has empty required values`);
         continue;
       }
 
@@ -175,33 +322,10 @@ export const processRTMFile = async (file: File): Promise<SystemFunction[]> => {
     return systemFunctions;
   } catch (error) {
     console.error('Error processing RTM file:', error);
-    toast.error('Failed to process RTM file. Please check file format.');
+    toast.error('Failed to process RTM file. Please check file format and try again.');
     return [];
   }
 };
-
-// Helper function to find the best matching column
-function findBestColumnMatch(headers: string[], possibleNames: string[]): number {
-  // Try exact match first
-  for (const name of possibleNames) {
-    const index = headers.indexOf(name);
-    if (index !== -1) return index;
-  }
-
-  // Try partial match
-  for (const name of possibleNames) {
-    for (let i = 0; i < headers.length; i++) {
-      if (headers[i].includes(name) || name.includes(headers[i])) {
-        return i;
-      }
-    }
-  }
-
-  return -1;
-}
-
-// Add this function BEFORE the processSequenceDiagramFile function
-// (around line 200-250 in your fileUtils.ts)
 
 // Enhanced REF name matching patterns
 const enhanceRefNameMatching = (refName: string): string[] => {
