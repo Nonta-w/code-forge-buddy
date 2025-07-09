@@ -25,6 +25,7 @@ export const validateFileExtension = (file: File, expectedType: FileType): boole
     case 'rtm':
       return fileName.endsWith('.csv');
     case 'sequenceDiagram':
+      return fileName.endsWith('.xml');
     case 'classDiagram':
       return fileName.endsWith('.xml');
     default:
@@ -42,7 +43,7 @@ export const readFileAsText = (file: File): Promise<string> => {
   });
 };
 
-// Enhanced CSV parser to handle special characters, quotes, and commas
+// handle special characters, quotes, and commas in CSV
 const parseCSVLine = (line: string): string[] => {
   const result: string[] = [];
   let current = '';
@@ -79,7 +80,7 @@ const parseCSVLine = (line: string): string[] => {
   return result;
 };
 
-// Enhanced CSV parser for the entire content
+// CSV parser
 const parseCSVContent = (content: string): string[][] => {
   const lines = content.split(/\r?\n/);
   const result: string[][] = [];
@@ -110,7 +111,7 @@ const cleanAndSplitDiagramNames = (diagramString: string): string[] => {
   // Handle various separators: comma, semicolon, pipe
   const separators = [',', ';', '|'];
   let separator = ',';
-  
+
   for (const sep of separators) {
     if (diagramString.includes(sep)) {
       separator = sep;
@@ -145,7 +146,7 @@ const findBestColumnMatch = (headers: string[], possibleNames: string[]): number
 
   // Normalize headers for matching
   const normalizedHeaders = headers.map(h => h.toLowerCase().replace(/[^a-z0-9]/g, ''));
-  
+
   // Try exact match first
   for (const name of possibleNames) {
     const normalizedName = name.toLowerCase().replace(/[^a-z0-9]/g, '');
@@ -182,7 +183,7 @@ const findBestColumnMatch = (headers: string[], possibleNames: string[]): number
   return -1;
 };
 
-// Process uploaded RTM file with enhanced CSV parsing
+// Process uploaded RTM
 export const processRTMFile = async (file: File): Promise<SystemFunction[]> => {
   try {
     const content = await readFileAsText(file);
@@ -327,66 +328,36 @@ export const processRTMFile = async (file: File): Promise<SystemFunction[]> => {
   }
 };
 
-// Enhanced REF name matching patterns
-const enhanceRefNameMatching = (refName: string): string[] => {
+// REF name matching patterns
+const enhanceRefNameMatching = (refName = ''): string[] => {
+  refName = refName.trim();
   if (!refName) return [];
 
-  const variations: string[] = [];
-  const cleaned = refName.trim();
+  // 1. strip prefixes (allow multiple, with/without space)
+  const base = refName.replace(/^(?:ref|sd|seq|sequence|diagram)+\s*/i, '');
 
-  // Add original name
-  variations.push(cleaned);
+  const variations = new Set<string>();
 
-  // Remove common prefixes
-  const withoutPrefixes = cleaned
-    .replace(/^(ref\s+|sd\s+|sequence\s+|diagram\s+)/i, '')
-    .trim();
-  if (withoutPrefixes !== cleaned) {
-    variations.push(withoutPrefixes);
-  }
+  const add = (s: string) => variations.add(s.trim()).add(s.trim().toLowerCase());
 
-  // Handle camelCase to space separated
-  const spacesSeparated = cleaned.replace(/([a-z])([A-Z])/g, '$1 $2');
-  if (spacesSeparated !== cleaned) {
-    variations.push(spacesSeparated);
-  }
+  add(base);                                       // original (prefix-less) + lowercase
+  add(base.replace(/([a-z])([A-Z])/g, '$1 $2'));   // camelCase → spaces
+  add(base.replace(/[_\-]/g, ' '));                // _ / -  → spaces
 
-  // Handle underscores and dashes
-  const normalized = cleaned.replace(/[_\-]/g, ' ');
-  if (normalized !== cleaned) {
-    variations.push(normalized);
-  }
+  // Capitalised & spaced form
+  const cap = base[0].toUpperCase() + base.slice(1);
+  add(cap);
+  add(cap.replace(/([a-z])([A-Z])/g, '$1 $2'));
 
-  // Handle common patterns like "ProcessDeposit" -> "Process Deposit"
-  const withSpaces = cleaned.replace(/([a-z])([A-Z])/g, '$1 $2');
-  if (withSpaces !== cleaned) {
-    variations.push(withSpaces);
-  }
+  // Diagram suffixes
+  add(`${base}Diagram`);
+  add(`${base} Diagram`);
 
-  // Handle operation name patterns - convert camelCase operations to potential diagram names
-  // processDeposit -> ProcessDeposit, Process Deposit, process-deposit
-  if (cleaned.match(/^[a-z]/)) {
-    // Capitalize first letter for potential class/diagram name
-    const capitalized = cleaned.charAt(0).toUpperCase() + cleaned.slice(1);
-    variations.push(capitalized);
-
-    // Add space-separated version of capitalized
-    const capitalizedWithSpaces = capitalized.replace(/([a-z])([A-Z])/g, '$1 $2');
-    variations.push(capitalizedWithSpaces);
-  }
-
-  // Add lowercase version
-  variations.push(cleaned.toLowerCase());
-
-  // Add potential diagram names by adding common suffixes
-  variations.push(cleaned + 'Diagram');
-  variations.push(cleaned + ' Diagram');
-
-  console.log(`REF name variations for "${refName}":`, variations);
-  return [...new Set(variations)]; // Remove duplicates
+  console.log(`REF name variations for "${refName}":`, [...variations]);
+  return [...variations];
 };
 
-// Enhanced diagram matching function
+// diagram matching function
 const findMatchingDiagram = (refName: string, diagrams: Map<string, SequenceDiagram>): SequenceDiagram | null => {
   const variations = enhanceRefNameMatching(refName);
 
@@ -423,7 +394,7 @@ const findMatchingDiagram = (refName: string, diagrams: Map<string, SequenceDiag
   return null;
 };
 
-// REPLACE the entire processSequenceDiagramFile function with this complete version:
+// read SD file content
 export const processSequenceDiagramFile = async (file: File): Promise<SequenceDiagram | null> => {
   try {
     const content = await readFileAsText(file);
@@ -773,7 +744,7 @@ export const processSequenceDiagramFile = async (file: File): Promise<SequenceDi
   }
 };
 
-// Process uploaded Class Diagram file with improved deduplication
+// Process uploaded Class Diagram file
 export const processClassDiagramFile = async (file: File): Promise<ClassInfo[] | null> => {
   try {
     const content = await readFileAsText(file);
@@ -805,9 +776,9 @@ export const processClassDiagramFile = async (file: File): Promise<ClassInfo[] |
       return null;
     }
 
-    // Get all Class elements under Models (including nested in packages)
+    // Get all Class elements under Models
     const classElements = modelsElement.getElementsByTagName('Class');
-    const classesMap = new Map<string, ClassInfo>(); // Use composite key for deduplication
+    const classesMap = new Map<string, ClassInfo>(); // Use name+package as key for deduplication
 
     console.log(`Found ${classElements.length} class elements`);
 
@@ -833,10 +804,11 @@ export const processClassDiagramFile = async (file: File): Promise<ClassInfo[] |
         parentElement = parentElement.parentElement;
       }
 
-      // Create composite key: package.className
-      const compositeKey = `${packageName}.${name}`;
+      // Use both name and package, but normalize package names
+      const normalizedPackage = packageName === 'default' ? '' : packageName;
+      const compositeKey = `${normalizedPackage}::${name}`;
 
-      console.log(`Processing class: ${name} (${xmlId}) in package: ${packageName}`);
+      console.log(`Processing class: ${name} (${xmlId}) in package: ${packageName}, key: ${compositeKey}`);
 
       // Extract operations (methods) from Visual Paradigm format
       const modelChildren = classElement.getElementsByTagName('ModelChildren')[0];
@@ -917,7 +889,7 @@ export const processClassDiagramFile = async (file: File): Promise<ClassInfo[] |
         }
       }
 
-      // Check for duplicates using composite key
+      // Duplicate handling logic
       if (classesMap.has(compositeKey)) {
         const existingClass = classesMap.get(compositeKey)!;
 
@@ -925,44 +897,36 @@ export const processClassDiagramFile = async (file: File): Promise<ClassInfo[] |
         console.log(`  Existing: ${existingClass.methods.length} methods`);
         console.log(`  New: ${methods.length} methods`);
 
-        // Merge strategy: Keep the most complete version
-        if (methods.length > existingClass.methods.length) {
-          // New version has more methods - replace
-          console.log(`  → Replacing with new version (more methods)`);
-          classesMap.set(compositeKey, {
-            id: existingClass.id, // Keep original ID for consistency
-            name,
-            packageName,
-            methods,
-            relatedFunctions: existingClass.relatedFunctions
-          });
-        } else if (methods.length === existingClass.methods.length && methods.length > 0) {
-          // Same number of methods - merge unique methods
-          console.log(`  → Merging methods`);
-          const methodMap = new Map<string, MethodInfo>();
+        // Merge methods
+        const methodMap = new Map<string, MethodInfo>();
 
-          // Add existing methods
-          existingClass.methods.forEach(method => {
-            const methodKey = `${method.name}(${method.parameters.map(p => p.type).join(',')})`;
+        // Add existing methods first
+        existingClass.methods.forEach(method => {
+          const methodKey = `${method.name}(${method.parameters.map(p => p.type).join(',')})`;
+          methodMap.set(methodKey, method);
+        });
+
+        // Add new methods
+        methods.forEach(method => {
+          const methodKey = `${method.name}(${method.parameters.map(p => p.type).join(',')})`;
+          const existingMethod = methodMap.get(methodKey);
+
+          // If new method has more complete information, use it
+          if (!existingMethod ||
+            method.parameters.length > existingMethod.parameters.length ||
+            method.returnType !== 'void' && existingMethod.returnType === 'void') {
             methodMap.set(methodKey, method);
-          });
+          }
+        });
 
-          // Add new methods (will overwrite if same signature)
-          methods.forEach(method => {
-            const methodKey = `${method.name}(${method.parameters.map(p => p.type).join(',')})`;
-            methodMap.set(methodKey, method);
-          });
-
-          existingClass.methods = Array.from(methodMap.values());
-          console.log(`  → Merged result: ${existingClass.methods.length} methods`);
-        } else {
-          // Keep existing (it's better or same)
-          console.log(`  → Keeping existing version`);
-        }
+        // Update the existing class with merged methods
+        existingClass.methods = Array.from(methodMap.values());
+        console.log(`  → Merged result: ${existingClass.methods.length} methods`);
       } else {
-        // New unique class
-        if (methods.length > 0 || packageName !== 'default') {
-          // Only add if it has methods OR is in a specific package
+        // New unique class - only add if it has substantial content
+        const hasSubstantialContent = methods.length > 0 || packageName !== 'default';
+
+        if (hasSubstantialContent) {
           classesMap.set(compositeKey, {
             id: generateId(),
             name,
@@ -972,31 +936,86 @@ export const processClassDiagramFile = async (file: File): Promise<ClassInfo[] |
           });
           console.log(`Added new class: ${compositeKey} with ${methods.length} methods`);
         } else {
-          console.log(`Skipping empty class: ${compositeKey}`);
+          console.log(`Skipping empty reference class: ${compositeKey}`);
         }
       }
     }
 
-    // Filter out classes that are clearly just references (no methods, default package)
-    const finalClasses = Array.from(classesMap.values()).filter(cls => {
-      const hasContent = cls.methods.length > 0 || cls.packageName !== 'default';
-      if (!hasContent) {
-        console.log(`Filtering out empty reference class: ${cls.packageName}.${cls.name}`);
-      }
-      return hasContent;
-    });
+    // Remove duplicates class
+    const finalClassesMap = new Map<string, ClassInfo>();
 
-    console.log('=== DEDUPLICATION SUMMARY ===');
+    for (const [key, classInfo] of classesMap.entries()) {
+      const className = classInfo.name;
+
+      // Check class with the same name but potentially different package
+      let shouldAdd = true;
+      let bestExisting: ClassInfo | null = null;
+
+      for (const [existingKey, existingClass] of finalClassesMap.entries()) {
+        if (existingClass.name === className) {
+          // Found another class with same name
+          console.log(`Found potential duplicate: ${className}`);
+          console.log(`  Existing: ${existingClass.packageName} (${existingClass.methods.length} methods)`);
+          console.log(`  New: ${classInfo.packageName} (${classInfo.methods.length} methods)`);
+
+          // Decide which one to keep based on completeness
+          if (classInfo.methods.length > existingClass.methods.length) {
+            // New one is better
+            finalClassesMap.delete(existingKey);
+            bestExisting = null;
+            console.log(`  → Replacing with new version (more methods)`);
+          } else if (classInfo.methods.length === existingClass.methods.length) {
+            // Same number of methods - prefer non-default package
+            if (classInfo.packageName !== 'default' && existingClass.packageName === 'default') {
+              finalClassesMap.delete(existingKey);
+              bestExisting = null;
+              console.log(`  → Replacing with new version (better package)`);
+            } else {
+              // Keep existing
+              shouldAdd = false;
+              bestExisting = existingClass;
+              console.log(`  → Keeping existing version`);
+            }
+          } else {
+            // Existing is better
+            shouldAdd = false;
+            bestExisting = existingClass;
+            console.log(`  → Keeping existing version (more methods)`);
+          }
+          break;
+        }
+      }
+
+      if (shouldAdd) {
+        finalClassesMap.set(key, classInfo);
+      } else if (bestExisting) {
+        // Merge any unique methods from the new class into the existing one
+        const existingMethodSignatures = new Set(
+          bestExisting.methods.map(m => `${m.name}(${m.parameters.map(p => p.type).join(',')})`)
+        );
+
+        classInfo.methods.forEach(newMethod => {
+          const newSignature = `${newMethod.name}(${newMethod.parameters.map(p => p.type).join(',')})`;
+          if (!existingMethodSignatures.has(newSignature)) {
+            bestExisting!.methods.push(newMethod);
+            console.log(`  → Merged unique method: ${newSignature}`);
+          }
+        });
+      }
+    }
+
+    const classes = Array.from(finalClassesMap.values());
+
+    console.log('=== ENHANCED DEDUPLICATION SUMMARY ===');
     console.log(`Original class elements: ${classElements.length}`);
-    console.log(`After deduplication: ${classesMap.size}`);
-    console.log(`After filtering: ${finalClasses.length}`);
+    console.log(`After initial processing: ${classesMap.size}`);
+    console.log(`After final deduplication: ${classes.length}`);
     console.log('Final unique classes:');
-    finalClasses.forEach(cls => {
+    classes.forEach(cls => {
       console.log(`  ${cls.packageName}.${cls.name} - ${cls.methods.length} methods`);
     });
 
-    const classes = finalClasses;
-    console.log('Processed class diagram after deduplication:', classes.length, 'unique classes');
+    console.log('Processed class diagram after enhanced deduplication:', classes.length, 'unique classes');
 
     if (classes.length === 0) {
       toast.warning('No classes found in the Visual Paradigm XML file');
@@ -1183,14 +1202,14 @@ export const mapFunctionsToClasses = (
   return updatedClasses;
 };
 
-// Generate stub code for a class with enhanced return values
+// Generate stub code
 export const generateStubCode = (cls: ClassInfo): string => {
   const packageLine = cls.packageName && cls.packageName !== 'default' ? `package ${cls.packageName};\n\n` : '';
 
   let code = `${packageLine}/**
  * Enhanced Stub for ${cls.name}
  * Generated on ${new Date().toISOString()}
- * Features: Enhanced return values and console logging
+ * generateStubCode
  */
 public class ${cls.name}Stub {\n`;
 
@@ -1213,7 +1232,7 @@ public class ${cls.name}Stub {\n`;
       if (method.returnType === 'void') {
         code += '        // Stub implementation - no return value\n';
       } else {
-        const returnValue = generateEnhancedReturnValue(method.returnType, method.name, cls.name);
+        const returnValue = generateRandomReturnValue(method.returnType, method.name, cls.name);
         code += `        ${method.returnType} result = ${returnValue};\n`;
         code += '        System.out.println("Returning: " + result);\n';
         code += '        return result;\n';
@@ -1232,126 +1251,108 @@ public class ${cls.name}Stub {\n`;
   return code;
 };
 
-// Enhanced return value generator based on method type and context
-const generateEnhancedReturnValue = (returnType: string, methodName: string, className: string): string => {
-  const lowerMethodName = methodName.toLowerCase();
-  const lowerClassName = className.toLowerCase();
 
-  // Context-aware return values based on method name patterns
-  if (returnType === 'boolean' || returnType === 'Boolean') {
-    if (lowerMethodName.startsWith('is') || lowerMethodName.startsWith('has') || lowerMethodName.startsWith('can')) {
-      return 'true';
-    } else if (lowerMethodName.includes('valid') || lowerMethodName.includes('exist')) {
-      return 'true';
-    } else if (lowerMethodName.includes('delete') || lowerMethodName.includes('save')) {
-      return 'true'; // Success operations
-    }
-    return 'true';
-  }
+const generateRandomReturnValue = (
+  returnType: string,
+  methodName: string,
+  className: string
+): string => {
 
-  if (returnType === 'String') {
-    if (lowerMethodName.includes('id') || lowerMethodName.includes('key')) {
-      return `"stub_${methodName.toLowerCase()}_12345"`;
-    } else if (lowerMethodName.includes('name')) {
-      return `"Stub${className}Name"`;
-    } else if (lowerMethodName.includes('status')) {
-      return '"ACTIVE"';
-    } else if (lowerMethodName.includes('message') || lowerMethodName.includes('error')) {
-      return `"Stub message from ${methodName}"`;
-    } else if (lowerMethodName.includes('process') || lowerMethodName.includes('execute')) {
-      return '"SUCCESS"';
-    }
-    return `"stub_${methodName.toLowerCase()}_result"`;
-  }
+  const t = returnType.trim();
+  const lowerMethod = methodName.toLowerCase();
 
-  // Numeric types with context awareness
-  if (['int', 'Integer'].includes(returnType)) {
-    if (lowerMethodName.includes('count') || lowerMethodName.includes('size')) {
-      return '5';
-    } else if (lowerMethodName.includes('id')) {
-      return '12345';
-    } else if (lowerMethodName.includes('amount') || lowerMethodName.includes('total')) {
-      return '1000';
-    }
-    return '42';
-  }
+  /* ---------- primitives & boxed ---------- */
+  switch (t) {
+    case 'boolean':
+    case 'Boolean':
+      return 'java.util.concurrent.ThreadLocalRandom.current().nextBoolean()';
 
-  if (['long', 'Long'].includes(returnType)) {
-    if (lowerMethodName.includes('time') || lowerMethodName.includes('timestamp')) {
-      return 'System.currentTimeMillis()';
-    } else if (lowerMethodName.includes('id')) {
-      return '123456789L';
-    }
-    return '1000L';
+    case 'byte':
+    case 'Byte':
+      return '(byte) java.util.concurrent.ThreadLocalRandom.current()'
+        + '.nextInt(Byte.MIN_VALUE, Byte.MAX_VALUE + 1)';
+
+    case 'short':
+    case 'Short':
+      return '(short) java.util.concurrent.ThreadLocalRandom.current()'
+        + '.nextInt(Short.MIN_VALUE, Short.MAX_VALUE + 1)';
+
+    case 'char':
+    case 'Character':
+      return "(char) java.util.concurrent.ThreadLocalRandom.current().nextInt('A', 'Z' + 1)";
+
+    case 'int':
+    case 'Integer':
+      return 'java.util.concurrent.ThreadLocalRandom.current().nextInt()';
+
+    case 'long':
+    case 'Long':
+      return 'java.util.concurrent.ThreadLocalRandom.current().nextLong()';
+
+    case 'float':
+    case 'Float':
+      return 'java.util.concurrent.ThreadLocalRandom.current().nextFloat()';
+
+    case 'double':
+    case 'Double':
+      return 'java.util.concurrent.ThreadLocalRandom.current().nextDouble()';
+
+    case 'String':
+      return `"${className}_${methodName}_" + java.util.UUID.randomUUID()`;
   }
 
-  if (['double', 'Double'].includes(returnType)) {
-    if (lowerMethodName.includes('amount') || lowerMethodName.includes('price') || lowerMethodName.includes('total')) {
-      return '99.99';
-    } else if (lowerMethodName.includes('rate') || lowerMethodName.includes('percent')) {
-      return '0.05';
-    }
-    return '2.718';
+  /* ---------- return blank set/array ---------- */
+  if (/(List|ArrayList)<.*>/.test(t)) return 'new java.util.ArrayList<>()';
+  if (/(Set|HashSet)<.*>/.test(t)) return 'new java.util.HashSet<>()';
+  if (/(Map|HashMap)<.*>/.test(t)) return 'new java.util.HashMap<>()';
+
+  /* ---------- handy common objects ---------- */
+  if (t.endsWith("Date")) return 'new java.util.Date()';
+  if (t.endsWith("BigDecimal")) return 'java.math.BigDecimal.ZERO';
+
+  /* ---------- attempt to instantiate any other class ---------- */
+  // Strip generics (Foo<Bar> → Foo) for the ctor test
+  const rawType = t.replace(/<.*>/, '').trim();
+
+  // Heuristic: looks like a concrete Java identifier, *and* isn’t obviously an interface
+  const looksInstantiable =
+    /^[A-Z][A-Za-z0-9_$.]*$/.test(rawType) &&   // PascalCase, no wildcards
+    !rawType.endsWith('Listener') &&
+    !rawType.endsWith('Callback');
+
+  if (looksInstantiable) {
+    return `new ${rawType}() /* generated for ${className}.${methodName} */`;
   }
 
-  if (['float', 'Float'].includes(returnType)) {
-    if (lowerMethodName.includes('rate') || lowerMethodName.includes('percent')) {
-      return '0.15f';
-    }
-    return '3.14f';
-  }
-
-  // Handle other primitive types
-  if (['byte', 'Byte'].includes(returnType)) return '(byte) 1';
-  if (['short', 'Short'].includes(returnType)) return '(short) 100';
-  if (['char', 'Character'].includes(returnType)) return "'X'";
-
-  // Handle collection types
-  if (returnType.includes('List') || returnType.includes('ArrayList')) {
-    return 'new java.util.ArrayList<>()';
-  }
-  if (returnType.includes('Set') || returnType.includes('HashSet')) {
-    return 'new java.util.HashSet<>()';
-  }
-  if (returnType.includes('Map') || returnType.includes('HashMap')) {
-    return 'new java.util.HashMap<>()';
-  }
-
-  // Handle common object types
-  if (returnType.includes('Date')) {
-    return 'new java.util.Date()';
-  }
-  if (returnType.includes('BigDecimal')) {
-    return 'new java.math.BigDecimal("100.00")';
-  }
-
-  // Default for unknown object types
-  return 'null // TODO: Return appropriate stub object';
+  /* ---------- fallback ---------- */
+  return 'null';
 };
 
-// Generate driver code for a class
-export const generateDriverCode = (cls: ClassInfo): string => {
-  const packageLine = cls.packageName ? `package ${cls.packageName};\n\n` : '';
+// Generate driver code
+export const generateDriverCode = (driverClass: ClassInfo, targetClassName: string): string => {
+  const packageLine = driverClass.packageName ? `package ${driverClass.packageName};\n\n` : '';
 
   let code = `${packageLine}import org.junit.Test;
 import static org.junit.Assert.*;
 
 /**
- * Test Driver for ${cls.name}
+ * Test Driver for ${driverClass.name}
  * Generated on ${new Date().toISOString()}
+ * This driver tests ${targetClassName} by simulating how ${driverClass.name} calls it
  */
-public class ${cls.name}Driver {
-    private ${cls.name} testObject = new ${cls.name}();
+public class ${driverClass.name}Driver {
+    private ${targetClassName} targetObject = new ${targetClassName}();
+    private ${driverClass.name} driverObject = new ${driverClass.name}();
 
 `;
 
-  // Add test methods - ensure we have methods to test
-  if (cls.methods && cls.methods.length > 0) {
-    cls.methods.forEach(method => {
+  // Add test methods that show how driverClass would interact with targetClassName
+  if (driverClass.methods && driverClass.methods.length > 0) {
+    driverClass.methods.forEach(method => {
       const methodName = method.name.charAt(0).toUpperCase() + method.name.slice(1);
-      code += `    @Test\n    public void test${methodName}() {\n`;
+      code += `    @Test\n    public void test${methodName}CallsTo${targetClassName}() {\n`;
 
-      // Generate parameter values
+      // Generate parameter values for the driver method
       const paramValues: string[] = [];
       const paramDeclarations: string[] = [];
 
@@ -1418,36 +1419,73 @@ public class ${cls.name}Driver {
         code += `        ${decl}\n`;
       });
 
-      // Call the method
-      if (method.returnType !== 'void') {
-        code += `
-        // Call the method and store the result
-        ${method.returnType} result = testObject.${method.name}(${paramValues.join(', ')});
+      code += `
+        // This test simulates how ${driverClass.name}.${method.name}() would call ${targetClassName}
+        // We're testing ${targetClassName} through the perspective of ${driverClass.name}
         
-        // TODO: Add assertions for the result
-        // assertEquals(expectedValue, result);
-        System.out.println("Method ${method.name} returned: " + result);
+        try {
+            // Step 1: Verify our target object exists and is ready
+            assertNotNull(targetObject);
+            
+            // Step 2: Simulate the driver calling the target
+            // TODO: Add specific calls to ${targetClassName} methods that ${driverClass.name}.${method.name}() would make
+            
+            // Step 3: Call the driver method (which should internally interact with ${targetClassName})
+            `;
+
+      if (method.returnType !== 'void') {
+        code += `${method.returnType} result = driverObject.${method.name}(${paramValues.join(', ')});
+            
+            // Verify the result and ${targetClassName} behavior
+            // TODO: Add assertions for the result and ${targetClassName} state
+            System.out.println("${driverClass.name}.${method.name}() returned: " + result);
+            System.out.println("${targetClassName} was successfully called by ${driverClass.name}.${method.name}()");
 `;
       } else {
-        code += `
-        // Call the method
-        testObject.${method.name}(${paramValues.join(', ')});
-        
-        // TODO: Add assertions if needed
-        System.out.println("Method ${method.name} executed successfully");
+        code += `driverObject.${method.name}(${paramValues.join(', ')});
+            
+            // Verify ${targetClassName} behavior after being called
+            // TODO: Add assertions to verify ${targetClassName} state
+            System.out.println("${driverClass.name}.${method.name}() successfully executed");
+            System.out.println("${targetClassName} was successfully called by ${driverClass.name}.${method.name}()");
 `;
       }
+
+      code += `            
+        } catch (Exception e) {
+            fail("${driverClass.name}.${method.name}() failed to properly interact with ${targetClassName}: " + e.getMessage());
+        }
+`;
 
       code += '    }\n\n';
     });
   } else {
     // Add a default test if no methods are found
-    code += `    @Test\n    public void testDefaultConstructor() {\n`;
-    code += `        // Test that the object can be created\n`;
-    code += `        assertNotNull(testObject);\n`;
-    code += `        System.out.println("${cls.name}Driver successfully created ${cls.name} object");\n`;
+    code += `    @Test\n    public void testDriverInteractionWith${targetClassName}() {\n`;
+    code += `        // Test basic interaction between ${driverClass.name} and ${targetClassName}\n`;
+    code += `        assertNotNull(driverObject);\n`;
+    code += `        assertNotNull(targetObject);\n`;
+    code += `        \n`;
+    code += `        // TODO: Add specific interaction tests\n`;
+    code += `        System.out.println("${driverClass.name}Driver successfully created and can interact with ${targetClassName}");\n`;
     code += '    }\n\n';
   }
+
+  // Add an integration test
+  code += `    @Test\n    public void test${driverClass.name}And${targetClassName}Integration() {\n`;
+  code += `        // Integration test: Verify ${driverClass.name} and ${targetClassName} work together\n`;
+  code += `        try {\n`;
+  code += `            assertNotNull(driverObject);\n`;
+  code += `            assertNotNull(targetObject);\n`;
+  code += `            \n`;
+  code += `            // TODO: Add comprehensive integration test logic\n`;
+  code += `            // Test the complete interaction flow between ${driverClass.name} and ${targetClassName}\n`;
+  code += `            \n`;
+  code += `            System.out.println("Integration test passed: ${driverClass.name} <-> ${targetClassName}");\n`;
+  code += `        } catch (Exception e) {\n`;
+  code += `            fail("Integration test failed: " + e.getMessage());\n`;
+  code += `        }\n`;
+  code += '    }\n\n';
 
   code += '}\n';
   return code;
@@ -1458,7 +1496,7 @@ export const generateBasicStubCode = (className: string): string => {
   return `/**
  * Basic Stub for ${className}
  * Generated on ${new Date().toISOString()}
- * Note: Class definition not found, this is a minimal stub
+ * generateBasicStubCode
  */
 public class ${className}Stub {
     
@@ -1487,7 +1525,7 @@ import static org.junit.Assert.*;
 /**
  * Basic Driver for ${driverClassName}
  * Generated on ${new Date().toISOString()}
- * Note: Class definition not found, this is a minimal driver
+ * generateBasicDriverCode
  */
 public class ${driverClassName}Driver {
     
@@ -1525,62 +1563,6 @@ public class ${driverClassName}Driver {
 `;
 };
 
-// Helper function to generate common methods based on class name patterns
-const generateCommonMethodsForClass = (className: string): string => {
-  const lowerClassName = className.toLowerCase();
-  let methods = '';
-
-  if (lowerClassName.includes('service')) {
-    methods += `
-    public String processRequest(String request) {
-        System.out.println("${className}Stub processing request: " + request);
-        return "processed_" + request;
-    }
-    
-    public boolean isAvailable() {
-        return true;
-    }`;
-  }
-
-  if (lowerClassName.includes('dao') || lowerClassName.includes('repository')) {
-    methods += `
-    public Object save(Object entity) {
-        System.out.println("${className}Stub saving entity");
-        return entity;
-    }
-    
-    public Object findById(String id) {
-        System.out.println("${className}Stub finding by id: " + id);
-        return new Object(); // Mock entity
-    }
-    
-    public boolean delete(String id) {
-        System.out.println("${className}Stub deleting id: " + id);
-        return true;
-    }`;
-  }
-
-  if (lowerClassName.includes('controller')) {
-    methods += `
-    public String handleRequest(String action, Object data) {
-        System.out.println("${className}Stub handling request: " + action);
-        return "success";
-    }`;
-  }
-
-  if (lowerClassName.includes('manager') || lowerClassName.includes('handler')) {
-    methods += `
-    public void execute() {
-        System.out.println("${className}Stub executing");
-    }
-    
-    public String getStatus() {
-        return "ready";
-    }`;
-  }
-
-  return methods;
-};
 
 // Generate service stub code for REF operations
 export const generateServiceStubCode = (serviceClassName: string): string => {
@@ -1698,4 +1680,61 @@ public class ${serviceClassName}Stub {
     ${generateServiceMethods(serviceClassName)}
 }
 `;
+};
+
+// In case of not found structure generate common methods based on class name patterns
+const generateCommonMethodsForClass = (className: string): string => {
+  const lowerClassName = className.toLowerCase();
+  let methods = '';
+
+  if (lowerClassName.includes('service')) {
+    methods += `
+    public String processRequest(String request) {
+        System.out.println("${className}Stub processing request: " + request);
+        return "processed_" + request;
+    }
+    
+    public boolean isAvailable() {
+        return true;
+    }`;
+  }
+
+  if (lowerClassName.includes('dao') || lowerClassName.includes('repository')) {
+    methods += `
+    public Object save(Object entity) {
+        System.out.println("${className}Stub saving entity");
+        return entity;
+    }
+    
+    public Object findById(String id) {
+        System.out.println("${className}Stub finding by id: " + id);
+        return new Object(); // Mock entity
+    }
+    
+    public boolean delete(String id) {
+        System.out.println("${className}Stub deleting id: " + id);
+        return true;
+    }`;
+  }
+
+  if (lowerClassName.includes('controller')) {
+    methods += `
+    public String handleRequest(String action, Object data) {
+        System.out.println("${className}Stub handling request: " + action);
+        return "success";
+    }`;
+  }
+
+  if (lowerClassName.includes('manager') || lowerClassName.includes('handler')) {
+    methods += `
+    public void execute() {
+        System.out.println("${className}Stub executing");
+    }
+    
+    public String getStatus() {
+        return "ready";
+    }`;
+  }
+
+  return methods;
 };

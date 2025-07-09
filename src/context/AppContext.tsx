@@ -6,7 +6,9 @@ import {
   ClassInfo,
   SequenceDiagram,
   GeneratedCode,
-  FileType
+  FileType,
+  Message,
+  ObjectNode
 } from '@/types';
 import {
   processRTMFile,
@@ -14,8 +16,8 @@ import {
   processClassDiagramFile,
   mapFunctionsToClasses,
   generateStubCode,
-  generateDriverCode,
   generateServiceStubCode,
+  generateDriverCode,
   generateId
 } from '@/utils/fileUtils';
 
@@ -220,10 +222,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     });
   };
 
-  // Generate code
-  // Add this function to your AppContext.tsx in the generateCode function
-  // Replace the existing generateCode function with this enhanced version
-
+  // Generate code for both stub/driver
   const generateCode = () => {
     try {
       setIsGenerating(true);
@@ -248,13 +247,13 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
 
         // Common patterns for operation-to-class mapping
         if (lowerOp.includes('deposit')) {
-          return 'TransactionService'; // or DepositService
+          return 'TransactionService';
         }
         if (lowerOp.includes('withdraw')) {
-          return 'TransactionService'; // or WithdrawService
+          return 'TransactionService';
         }
         if (lowerOp.includes('transfer')) {
-          return 'TransactionService'; // or TransferService
+          return 'TransactionService';
         }
         if (lowerOp.includes('process')) {
           return 'TransactionService';
@@ -282,14 +281,12 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
         }
 
         // Default: try to derive from operation name
-        // processDeposit -> ProcessDepositService
         const capitalized = operationName.charAt(0).toUpperCase() + operationName.slice(1);
         return capitalized + 'Service';
       };
 
       // Helper function to process a diagram and its references recursively
       const processSequenceDiagramRecursively = (diagram: SequenceDiagram, visited: Set<string> = new Set()) => {
-        // Prevent infinite recursion
         if (visited.has(diagram.name)) {
           return;
         }
@@ -299,51 +296,46 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
 
         // Process messages in current diagram
         diagram.messages.forEach(message => {
-          console.log(`Processing message: ${message.name}, type: ${message.type}, from->to: ${message.from}->${message.to}`);
-
           const fromObj = diagram.objects.find(obj => obj.id === message.from);
           const toObj = diagram.objects.find(obj => obj.id === message.to);
 
           if (fromObj && toObj && fromObj.type && toObj.type) {
-            console.log(`Message: ${fromObj.type} -> ${toObj.type} (${message.name})`);
+            console.log(`Analyzing message: "${message.name}" from ${fromObj.type} to ${toObj.type}, type: ${message.type}`);
 
-            // Skip return messages, self-calls, and certain system messages
-            if (message.name && (
-              message.name.toLowerCase().includes('return') ||
-              message.name.toLowerCase().includes('response') ||
-              message.name.toLowerCase().includes('transaction') ||
-              message.type === 'return' ||
-              fromObj.type === toObj.type // Skip self-calls
-            )) {
-              console.log(`Skipping message: ${message.name} (${fromObj.type} -> ${toObj.type})`);
+            // FIXED: Better detection of call vs return messages
+            const isReturnMessage = detectReturnMessage(message, fromObj, toObj);
+
+            if (isReturnMessage) {
+              console.log(`  → Skipping return message: ${message.name}`);
+              return;
+            }
+
+            // Skip self-calls
+            if (fromObj.type === toObj.type) {
+              console.log(`  → Skipping self-call: ${fromObj.type} → ${toObj.type}`);
               return;
             }
 
             // Skip messages to/from actors and refs
             if (fromObj.type === 'ACTOR' || toObj.type === 'ACTOR' ||
               fromObj.type === 'REF' || toObj.type === 'REF') {
-              console.log(`Skipping actor/ref message: ${message.name}`);
+              console.log(`  → Skipping actor/ref message: ${fromObj.type} → ${toObj.type}`);
               return;
             }
 
-            // Record that fromObj.type calls toObj.type
+            // This is a valid call message - record it
             if (!callGraph.has(fromObj.type)) {
               callGraph.set(fromObj.type, new Set<string>());
             }
             callGraph.get(fromObj.type)?.add(toObj.type);
-            console.log(`Added to call graph: ${fromObj.type} calls ${toObj.type}`);
+            console.log(`  → Added call: ${fromObj.type} calls ${toObj.type}`);
           }
         });
 
-        // Enhanced REF processing - map operations to classes and add them to call graph
         diagram.references.forEach(ref => {
-          console.log(`Processing reference: ${ref.name} -> ${ref.diagramName}`);
-
           if (ref.diagramName) {
-            // Try to find the referenced diagram first
             let refDiagram = sequenceDiagrams.find(d => d.name === ref.diagramName);
 
-            // Try fuzzy matching if exact match not found
             if (!refDiagram) {
               refDiagram = sequenceDiagrams.find(d =>
                 d.name.toLowerCase().includes(ref.diagramName.toLowerCase()) ||
@@ -352,51 +344,37 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
             }
 
             if (refDiagram) {
-              console.log(`Found referenced diagram: ${refDiagram.name}, processing recursively...`);
               processSequenceDiagramRecursively(refDiagram, visited);
             } else {
-              // REF points to an operation, not a diagram - map to a service class
-              console.log(`Referenced diagram not found: ${ref.diagramName}, treating as operation`);
-
               const serviceClassName = mapOperationToClassName(ref.diagramName);
-              console.log(`Mapped operation "${ref.diagramName}" to service class: ${serviceClassName}`);
-
-              // Find the object that contains this REF to determine which class calls the service
               const refObject = diagram.objects.find(obj => obj.name === ref.name || obj.type === 'REF');
+
               if (refObject) {
-                // Look for messages involving this REF object to find caller
                 diagram.messages.forEach(msg => {
                   const fromObj = diagram.objects.find(obj => obj.id === msg.from);
                   const toObj = diagram.objects.find(obj => obj.id === msg.to);
 
-                  // If message is to/from REF object, establish call relationship
                   if (fromObj && toObj) {
                     if (msg.to === refObject.id && fromObj.type !== 'ACTOR' && fromObj.type !== 'REF') {
-                      // fromObj calls the service
                       if (!callGraph.has(fromObj.type)) {
                         callGraph.set(fromObj.type, new Set<string>());
                       }
                       callGraph.get(fromObj.type)?.add(serviceClassName);
-                      console.log(`Added REF call to graph: ${fromObj.type} calls ${serviceClassName} (via ${ref.diagramName})`);
                     }
                     if (msg.from === refObject.id && toObj.type !== 'ACTOR' && toObj.type !== 'REF') {
-                      // service calls toObj (less common, but possible)
                       if (!callGraph.has(serviceClassName)) {
                         callGraph.set(serviceClassName, new Set<string>());
                       }
                       callGraph.get(serviceClassName)?.add(toObj.type);
-                      console.log(`Added REF call to graph: ${serviceClassName} calls ${toObj.type} (via ${ref.diagramName})`);
                     }
                   }
                 });
               } else {
-                // Fallback: assume the main class under test calls this service
                 selectedClasses.forEach(cls => {
                   if (!callGraph.has(cls.name)) {
                     callGraph.set(cls.name, new Set<string>());
                   }
                   callGraph.get(cls.name)?.add(serviceClassName);
-                  console.log(`Added fallback REF call: ${cls.name} calls ${serviceClassName} (via ${ref.diagramName})`);
                 });
               }
             }
@@ -404,130 +382,299 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
         });
       };
 
-      // Build call graph from sequence diagrams (including referenced diagrams)
-      sequenceDiagrams.forEach(diagram => {
-        processSequenceDiagramRecursively(diagram);
-      });
+      // Helper function to detect if a message is a return message
+      const detectReturnMessage = (message: Message, fromObj: ObjectNode, toObj: ObjectNode): boolean => {
+        const messageName = message.name?.toLowerCase() || '';
+        const messageType = message.type?.toLowerCase() || '';
 
-      console.log('Enhanced call graph (including REF operations):', callGraph);
-      console.log('Selected classes for testing:', selectedClassNames);
+        console.log(`    Analyzing message: "${message.name}" - Type: ${messageType}`);
 
-      // For each selected class (class under test), generate needed stubs and drivers
-      selectedClasses.forEach(classUnderTest => {
-        console.log(`Generating stubs and drivers for class under test: ${classUnderTest.name}`);
+        // 1. Check message type explicitly
+        if (messageType === 'return' || messageType === 'reply' || messageType === 'response') {
+          console.log(`    → Return by type: ${messageType}`);
+          return true;
+        }
 
-        // 1. Generate STUBS for classes that are CALLED BY the class under test
-        const calledClasses = callGraph.get(classUnderTest.name) || new Set<string>();
-        console.log(`Classes called by ${classUnderTest.name}:`, Array.from(calledClasses));
+        // 2. Check for explicit return keywords
+        const returnKeywords = [
+          /^(return|reply|response)/i,
+          /\breturn\b/i,
+          /\breply\b/i,
+          /\bresponse\b/i
+        ];
 
-        calledClasses.forEach(calledClassName => {
-          // Only create stub if the called class is not also under test
-          if (!selectedClassNames.has(calledClassName)) {
-            const calledClass = classMap.get(calledClassName);
-            if (calledClass) {
-              // We have the class definition, generate detailed stub
-              const stubFileName = `${calledClassName}Stub.java`;
-              if (!generatedFileNames.has(stubFileName)) {
-                const stubCode = generateStubCode(calledClass);
-                newGeneratedCodes.push({
-                  id: generateId(),
-                  fileName: stubFileName,
-                  fileContent: stubCode,
-                  type: 'stub',
-                  timestamp: new Date(),
-                  relatedClass: calledClassName
-                });
-                generatedFileNames.add(stubFileName);
-                console.log(`Generated detailed stub for ${calledClassName} (called by ${classUnderTest.name})`);
-              }
-            } else {
-              // No class definition, but we know it's needed - generate basic stub
-              console.log(`Class ${calledClassName} not found in class map, creating service stub`);
-              const stubFileName = `${calledClassName}Stub.java`;
-              if (!generatedFileNames.has(stubFileName)) {
-                const serviceStubCode = generateServiceStubCode(calledClassName);
-                newGeneratedCodes.push({
-                  id: generateId(),
-                  fileName: stubFileName,
-                  fileContent: serviceStubCode,
-                  type: 'stub',
-                  timestamp: new Date(),
-                  relatedClass: calledClassName
-                });
-                generatedFileNames.add(stubFileName);
-                console.log(`Generated service stub for ${calledClassName} (class definition not found)`);
-              }
+        for (const pattern of returnKeywords) {
+          if (pattern.test(messageName)) {
+            console.log(`    → Return by keyword pattern`);
+            return true;
+          }
+        }
+
+        // 3. Data type and value patterns (returns)
+        const returnDataPatterns = [
+          /^(void|null|undefined)$/i,                    // void, null, undefined
+          /^[A-Z][a-zA-Z]*\s+(object|instance|data)$/i, // "Account object", "User instance", "Transaction data"
+          /^[A-Z][a-zA-Z]*\[\]$/i,                      // "String[]", "Account[]" - array returns
+          /^List<[^>]+>$/i,                             // "List<Account>", "List<String>"
+          /^Map<[^>]+>$/i,                              // "Map<String, Account>"
+          /^Optional<[^>]+>$/i,                         // "Optional<Account>"
+          /^\w+\s*[+\-*/=]\s*\w+/,                     // "balance += 100", "count = 5"
+          /^(true|false)$/i,                           // boolean literals
+          /^\d+(\.\d+)?$/,                             // number literals: "123", "45.67"
+          /^"[^"]*"$/,                                 // string literals: "success", "error message"
+          /^'[^']*'$/,                                 // single quote strings: 'completed'
+          /^\{.*\}$/,                                  // JSON objects: "{id: 123, name: 'test'}"
+          /^\[.*\]$/,                                  // Arrays: "[1, 2, 3]", "['a', 'b']"
+        ];
+
+        for (const pattern of returnDataPatterns) {
+          if (pattern.test(messageName)) {
+            console.log(`    → Return by data pattern: ${pattern}`);
+            return true;
+          }
+        }
+
+        // 4. Enhanced method call detection
+        if (messageName.includes('(') && messageName.includes(')')) {
+          console.log(`    → Has parentheses, analyzing...`);
+
+          // 4a. FIXED: Specific return action patterns (only specific methods that are clearly return actions)
+          const returnActionPatterns = [
+            /\.(send|emit|publish|notify)\s*\(/i,                       // Communication methods
+            /\.(log|trace|debug|info|warn|error|print|println)\s*\(/i, // Logging methods
+            /\.(close|dispose|cleanup|finalize|shutdown)\s*\(/i,       // Cleanup methods
+          ];
+
+          for (const pattern of returnActionPatterns) {
+            if (pattern.test(messageName)) {
+              console.log(`    → Return action pattern matched: ${pattern}`);
+              return true;
             }
           }
-        });
 
-        // 2. Generate DRIVERS for classes that CALL the class under test
-        callGraph.forEach((calledClasses, callerClassName) => {
-          if (calledClasses.has(classUnderTest.name)) {
-            // This caller class calls our class under test
-            // Only create driver if the caller is not also under test
-            if (!selectedClassNames.has(callerClassName)) {
-              const driverFileName = `${callerClassName}Driver.java`;
-              if (!generatedFileNames.has(driverFileName)) {
-                // Find the caller class info to generate proper driver
-                const callerClass = classMap.get(callerClassName);
-                if (callerClass) {
-                  const driverCode = generateDriverCode(callerClass);
-                  newGeneratedCodes.push({
-                    id: generateId(),
-                    fileName: driverFileName,
-                    fileContent: driverCode,
-                    type: 'driver',
-                    timestamp: new Date(),
-                    relatedClass: callerClassName
-                  });
-                  generatedFileNames.add(driverFileName);
-                  console.log(`Generated driver for ${callerClassName} (to call ${classUnderTest.name})`);
-                } else {
-                  console.log(`Class ${callerClassName} not found in class map, creating basic driver`);
-                  // Create a basic driver even if we don't have the class definition
-                  const basicDriverCode = generateBasicDriverCode(callerClassName, classUnderTest.name);
-                  newGeneratedCodes.push({
-                    id: generateId(),
-                    fileName: driverFileName,
-                    fileContent: basicDriverCode,
-                    type: 'driver',
-                    timestamp: new Date(),
-                    relatedClass: callerClassName
-                  });
-                  generatedFileNames.add(driverFileName);
-                  console.log(`Generated basic driver for ${callerClassName} (class definition not found)`);
+          // 4b. FIXED: State change methods - need context analysis
+          // Only consider these as return actions if they're clearly side effects
+          const contextualReturnPatterns = [
+            /\.(update|set|put|add|remove|delete|clear|reset)\s*\(/i,   // State change methods
+            /\.(save|persist|store|write|flush)\s*\(/i,                 // Persistence methods
+          ];
+
+          for (const pattern of contextualReturnPatterns) {
+            if (pattern.test(messageName)) {
+              // Additional context check: if it's a direct property access on an object name
+              // that suggests it's a side effect return action
+              const directPropertyPattern = /^[a-z]+\.[a-z]+\(/i;
+              if (directPropertyPattern.test(messageName)) {
+                // Check if the object name suggests it's a side effect
+                const sideEffectObjects = ['cache', 'storage', 'log', 'logger', 'database', 'db', 'repo', 'repository'];
+                const objectName = messageName.split('.')[0];
+                if (sideEffectObjects.includes(objectName)) {
+                  console.log(`    → Side effect return action: ${objectName}.${pattern}`);
+                  return true;
                 }
               }
             }
           }
+
+          // 4c. Definite method call patterns (these are always calls, never returns)
+          const definiteCallPatterns = [
+            /^[a-z][a-zA-Z]*\s*\(/,                                     // methodName( - simple method calls
+            /^[A-Z][a-zA-Z]*\s*\(/,                                     // ClassName( - constructors
+            /\.(get|find|fetch|retrieve|load|read|query|search|select)\s*\(/i, // Data retrieval methods
+            /\.(create|make|build|construct|new|generate)\s*\(/i,      // Creation methods
+            /\.(process|execute|run|perform|handle|manage|do)\s*\(/i,  // Processing methods
+            /\.(validate|verify|check|test|confirm|ensure)\s*\(/i,     // Validation methods
+            /\.(calculate|compute|sum|count|total|aggregate)\s*\(/i,   // Calculation methods
+            /\.(connect|disconnect|open|start|stop|begin|end|init)\s*\(/i, // Lifecycle methods
+            /\.(deposit|withdraw|transfer|payment|transaction)\s*\(/i, // Business operations
+            /^[a-z]+\.(get|find|query|select|retrieve)\s*\(/i,        // Specific: object.getXXX() calls
+          ];
+
+          for (const pattern of definiteCallPatterns) {
+            if (pattern.test(messageName)) {
+              console.log(`    → Definite call pattern: ${pattern}`);
+              return false; // This is definitely a method call
+            }
+          }
+
+          // 4d. Default for property.method() calls - assume they are method calls unless proven otherwise
+          const propertyMethodPattern = /^[a-z][a-zA-Z]*\.[a-z][a-zA-Z]*\(/i;
+          if (propertyMethodPattern.test(messageName)) {
+            console.log(`    → Property method call - defaulting to CALL`);
+            return false; // Default property.method() calls to be method calls
+          }
+
+          // Default for other parentheses: assume it's a call
+          console.log(`    → Default: method with parentheses = call`);
+          return false;
+        }
+
+        // 5. Single words or phrases without parentheses
+        if (!messageName.includes('(')) {
+          console.log(`    → No parentheses, checking for return data indicators...`);
+
+          // Return data indicators
+          const returnIndicators = [
+            'object', 'instance', 'data', 'result', 'value', 'response',
+            '=', '+=', '-=', '*=', '/=', '++', '--',
+            'success', 'error', 'failed', 'completed', 'finished',
+            'updated', 'saved', 'deleted', 'created'
+          ];
+
+          for (const indicator of returnIndicators) {
+            if (messageName.includes(indicator)) {
+              console.log(`    → Return indicator found: ${indicator}`);
+              return true;
+            }
+          }
+
+          // If it's a short simple word without indicators, could be either
+          // Let's be conservative and assume it's return data if it's not obviously a command
+          const commandWords = ['start', 'stop', 'begin', 'end', 'run', 'execute', 'process', 'handle'];
+          const isCommand = commandWords.some(cmd => messageName.includes(cmd));
+
+          if (!isCommand && messageName.length < 20) {
+            console.log(`    → Short non-command word = likely return data`);
+            return true;
+          }
+        }
+
+        // Default: assume it's a call message
+        console.log(`    → Default: call message`);
+        return false;
+      };
+
+      // Build call graph from sequence diagrams
+      sequenceDiagrams.forEach(diagram => {
+        processSequenceDiagramRecursively(diagram);
+      });
+
+      console.log('Call graph:', callGraph);
+      console.log('Selected classes for testing:', selectedClassNames);
+
+      // FIXED: Collect all needed stubs and drivers FIRST, then generate them
+      const neededStubs = new Set<string>();
+      const neededDrivers = new Set<string>();
+
+      // For each selected class, determine what stubs and drivers are needed
+      selectedClasses.forEach(classUnderTest => {
+        console.log(`Analyzing dependencies for class under test: ${classUnderTest.name}`);
+
+        // 1. Collect STUBS for classes that are CALLED BY the class under test
+        const calledClasses = callGraph.get(classUnderTest.name) || new Set<string>();
+        calledClasses.forEach(calledClassName => {
+          if (!selectedClassNames.has(calledClassName)) {
+            neededStubs.add(calledClassName);
+            console.log(`Need stub for: ${calledClassName} (called by ${classUnderTest.name})`);
+          }
         });
+
+        // 2. Collect DRIVERS for classes that CALL the class under test
+        callGraph.forEach((calledClasses, callerClassName) => {
+          if (calledClasses.has(classUnderTest.name)) {
+            if (!selectedClassNames.has(callerClassName)) {
+              neededDrivers.add(callerClassName);
+              console.log(`Need driver for: ${callerClassName} (calls ${classUnderTest.name})`);
+            }
+          }
+        });
+      });
+
+      console.log('All needed stubs:', Array.from(neededStubs));
+      console.log('All needed drivers:', Array.from(neededDrivers));
+
+      // Now generate stubs - only once per class
+      neededStubs.forEach(stubClassName => {
+        const stubFileName = `${stubClassName}Stub.java`;
+
+        if (!generatedFileNames.has(stubFileName)) {
+          const stubClass = classMap.get(stubClassName);
+          let stubCode: string;
+
+          if (stubClass) {
+            // We have the class definition, generate detailed stub
+            stubCode = generateStubCode(stubClass);
+            console.log(`Generated detailed stub for ${stubClassName}`);
+          } else {
+            // No class definition, generate service stub
+            stubCode = generateServiceStubCode(stubClassName);
+            console.log(`Generated service stub for ${stubClassName}`);
+          }
+
+          newGeneratedCodes.push({
+            id: generateId(),
+            fileName: stubFileName,
+            fileContent: stubCode,
+            type: 'stub',
+            timestamp: new Date(),
+            relatedClass: stubClassName
+          });
+          generatedFileNames.add(stubFileName);
+        }
+      });
+
+      // Generate drivers
+      neededDrivers.forEach(driverClassName => {
+        const driverFileName = `${driverClassName}Driver.java`;
+
+        if (!generatedFileNames.has(driverFileName)) {
+          const driverClass = classMap.get(driverClassName);
+
+          // Find which selected class this driver should test
+          const targetClasses = selectedClasses.filter(cls =>
+            callGraph.get(driverClassName)?.has(cls.name)
+          );
+
+          // Use the first target class (in case there are multiple)
+          const targetClassName = targetClasses.length > 0 ? targetClasses[0].name : 'UnknownTarget';
+
+          let driverCode: string;
+
+          if (driverClass) {
+            // UPDATED: Pass both driverClass and targetClassName
+            driverCode = generateDriverCode(driverClass, targetClassName);
+            console.log(`Generated detailed driver for ${driverClassName} -> ${targetClassName}`);
+          } else {
+            // Keep the basic driver as fallback
+            driverCode = generateBasicDriverCode(driverClassName, targetClassName);
+            console.log(`Generated basic driver for ${driverClassName} -> ${targetClassName}`);
+          }
+
+          newGeneratedCodes.push({
+            id: generateId(),
+            fileName: driverFileName,
+            fileContent: driverCode,
+            type: 'driver',
+            timestamp: new Date(),
+            relatedClass: driverClassName
+          });
+          generatedFileNames.add(driverFileName);
+        }
       });
 
       // Check if any stubs or drivers were generated
       if (newGeneratedCodes.length === 0) {
-        // No stubs or drivers needed - inform the user
         const selectedClassNames = selectedClasses.map(cls => cls.name).join(', ');
         toast.success(`${selectedClassNames} can be tested independently - no additional stubs/drivers needed.`);
 
         // Create a brief summary file
         const summaryContent = `Test Analysis Summary
-Generated: ${new Date().toLocaleString()}
+  Generated: ${new Date().toLocaleString()}
 
-Selected: ${selectedClassNames}
+  Selected Classes: ${selectedClassNames}
 
-Result: No stubs or drivers required.
-These classes can be tested directly with JUnit/TestNG.
+  Result: No stubs or drivers required.
+  These classes can be tested directly with JUnit/TestNG.
 
-Call Graph:
-${Array.from(callGraph.entries()).map(([caller, called]) =>
+  Call Graph Analysis:
+  ${Array.from(callGraph.entries()).map(([caller, called]) =>
           `${caller} → [${Array.from(called).join(', ')}]`
         ).join('\n')}
-`;
+  `;
 
         const summaryCode: GeneratedCode = {
           id: generateId(),
-          fileName: 'TestSummary.txt',
+          fileName: 'TestAnalysisSummary.txt',
           fileContent: summaryContent,
           type: 'driver',
           timestamp: new Date(),
@@ -549,7 +696,7 @@ ${Array.from(callGraph.entries()).map(([caller, called]) =>
 
       setGeneratedCodes(prev => [...prev, ...newGeneratedCodes]);
       setCodeSessions(prev => [...prev, newSession]);
-      setCurrentStep(4); // Move to code view
+      setCurrentStep(4);
 
       const fileCount = newGeneratedCodes.filter(code => code.fileName !== 'TestAnalysisSummary.txt').length;
 
@@ -613,8 +760,6 @@ public class ${driverClassName}Driver {
     public void testBasicInteraction() {
         setUp();
         
-        // Basic test to verify the target object can be created and interacted with
-        assertNotNull(targetObject);
         System.out.println("${driverClassName}Driver successfully created ${targetClassName} object");
         
         // TODO: Add specific test methods based on your requirements
