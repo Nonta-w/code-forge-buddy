@@ -1012,11 +1012,83 @@ export const processClassDiagramFile = async (file: File): Promise<ClassInfo[] |
   }
 };
 
+// Configuration for operation-to-class mapping
+interface MappingConfig {
+  excludedObjectTypes: string[];
+  referenceNamePatterns: RegExp[];
+  normalizationRules: { pattern: RegExp; replacement: string }[];
+  matchingStrategies: ((name1: string, name2: string) => boolean)[];
+}
+
+// Default mapping configuration
+const defaultMappingConfig: MappingConfig = {
+  excludedObjectTypes: ['unknown', 'ACTOR', 'REF'],
+  referenceNamePatterns: [/^(ref\s+|sd\s+)/i],
+  normalizationRules: [
+    { pattern: /[_\s-]+/g, replacement: '' }
+  ],
+  matchingStrategies: [
+    (a, b) => a === b, // Exact match
+    (a, b) => a.toLowerCase() === b.toLowerCase(), // Case-insensitive
+    (a, b) => a.includes(b) || b.includes(a), // Partial match
+  ]
+};
+
+// Helper function to normalize names based on config
+const normalizeName = (name: string, config: MappingConfig): string => {
+  let normalized = name.toLowerCase();
+  
+  // Apply reference name patterns
+  config.referenceNamePatterns.forEach(pattern => {
+    normalized = normalized.replace(pattern, '');
+  });
+  
+  // Apply normalization rules
+  config.normalizationRules.forEach(rule => {
+    normalized = normalized.replace(rule.pattern, rule.replacement);
+  });
+  
+  return normalized.trim();
+};
+
+// Helper function to find matching diagram using configured strategies
+const findMatchingDiagramWithConfig = (
+  targetName: string,
+  diagramMap: Map<string, SequenceDiagram>,
+  config: MappingConfig
+): SequenceDiagram | null => {
+  // Try each matching strategy in order
+  for (const strategy of config.matchingStrategies) {
+    for (const [diagName, diagram] of diagramMap.entries()) {
+      if (strategy(targetName, diagName)) {
+        return diagram;
+      }
+    }
+  }
+  
+  // Try normalized matching as fallback
+  const normalizedTarget = normalizeName(targetName, config);
+  for (const [diagName, diagram] of diagramMap.entries()) {
+    const normalizedDiagName = normalizeName(diagName, config);
+    if (normalizedDiagName.includes(normalizedTarget) || normalizedTarget.includes(normalizedDiagName)) {
+      return diagram;
+    }
+  }
+  
+  return null;
+};
+
+// Helper function to check if object type should be included
+const shouldIncludeObjectType = (type: string, config: MappingConfig): boolean => {
+  return type && !config.excludedObjectTypes.includes(type);
+};
+
 // Map functions to classes based on sequence diagrams
 export const mapFunctionsToClasses = (
   functions: SystemFunction[],
   sequenceDiagrams: SequenceDiagram[],
-  classes: ClassInfo[]
+  classes: ClassInfo[],
+  config: MappingConfig = defaultMappingConfig
 ): ClassInfo[] => {
   console.log('=== Enhanced Function to Class Mapping Debug ===');
   console.log('Functions:', functions);
@@ -1045,9 +1117,9 @@ export const mapFunctionsToClasses = (
 
     console.log(`Getting class names from diagram: ${diagram.name}`);
 
-    // Add all object types as related classes
+    // Add all valid object types as related classes
     diagram.objects.forEach(obj => {
-      if (obj.type && obj.type !== 'unknown' && obj.type !== 'ACTOR' && obj.type !== 'REF') {
+      if (shouldIncludeObjectType(obj.type, config)) {
         relatedClassNames.add(obj.type);
         console.log(`Added class from object: ${obj.type} (from object: ${obj.name})`);
       }
@@ -1058,55 +1130,8 @@ export const mapFunctionsToClasses = (
       console.log(`Processing reference: ${ref.name} -> ${ref.diagramName}`);
 
       if (ref.diagramName) {
-        // Try exact match first
-        let refDiagram = diagramMap.get(ref.diagramName);
-
-        // If not found, try fuzzy matching
-        if (!refDiagram) {
-          console.log(`Exact match not found for ${ref.diagramName}, trying fuzzy matching...`);
-
-          // Try case-insensitive matching
-          for (const [diagName, diag] of diagramMap.entries()) {
-            if (diagName.toLowerCase() === ref.diagramName.toLowerCase()) {
-              refDiagram = diag;
-              console.log(`Found case-insensitive match: ${diagName}`);
-              break;
-            }
-          }
-
-          // Try partial matching
-          if (!refDiagram) {
-            for (const [diagName, diag] of diagramMap.entries()) {
-              if (diagName.includes(ref.diagramName) || ref.diagramName.includes(diagName)) {
-                refDiagram = diag;
-                console.log(`Found partial match: ${diagName} for ${ref.diagramName}`);
-                break;
-              }
-            }
-          }
-
-          // Try matching against common patterns
-          if (!refDiagram) {
-            const normalizedRefName = ref.diagramName.toLowerCase()
-              .replace(/^(ref\s+|sd\s+)/i, '')
-              .replace(/[_\s-]+/g, '')
-              .trim();
-
-            for (const [diagName, diag] of diagramMap.entries()) {
-              const normalizedDiagName = diagName.toLowerCase()
-                .replace(/[_\s-]+/g, '')
-                .trim();
-
-              if (normalizedDiagName.includes(normalizedRefName) ||
-                normalizedRefName.includes(normalizedDiagName)) {
-                refDiagram = diag;
-                console.log(`Found normalized match: ${diagName} for ${ref.diagramName}`);
-                break;
-              }
-            }
-          }
-        }
-
+        const refDiagram = findMatchingDiagramWithConfig(ref.diagramName, diagramMap, config);
+        
         if (refDiagram) {
           console.log(`Found referenced diagram: ${refDiagram.name}`);
           // Recursively get classes from referenced diagram
@@ -1140,25 +1165,15 @@ export const mapFunctionsToClasses = (
 
     diagramNames.forEach(diagramName => {
       console.log(`Looking for diagram: ${diagramName}`);
-      const diagram = diagramMap.get(diagramName);
+      const diagram = findMatchingDiagramWithConfig(diagramName, diagramMap, config);
+      
       if (diagram) {
-        console.log(`Found diagram: ${diagramName}`);
+        console.log(`Found diagram: ${diagram.name}`);
         const classNamesFromDiagram = getRelatedClassNamesFromDiagram(diagram);
         classNamesFromDiagram.forEach(className => allRelatedClassNames.add(className));
       } else {
         console.log(`Diagram not found: ${diagramName}`);
-        // Try to find diagram with partial name matching
-        const possibleDiagrams = sequenceDiagrams.filter(d =>
-          d.name.toLowerCase().includes(diagramName.toLowerCase()) ||
-          diagramName.toLowerCase().includes(d.name.toLowerCase())
-        );
-        if (possibleDiagrams.length > 0) {
-          console.log(`Found possible matches:`, possibleDiagrams.map(d => d.name));
-          possibleDiagrams.forEach(diagram => {
-            const classNamesFromDiagram = getRelatedClassNamesFromDiagram(diagram);
-            classNamesFromDiagram.forEach(className => allRelatedClassNames.add(className));
-          });
-        }
+        console.log('Available diagrams:', Array.from(diagramMap.keys()));
       }
     });
 
