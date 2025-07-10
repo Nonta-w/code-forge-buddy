@@ -1232,7 +1232,7 @@ public class ${cls.name}Stub {\n`;
       if (method.returnType === 'void') {
         code += '        // Stub implementation - no return value\n';
       } else {
-        const returnValue = generateRandomReturnValue(method.returnType, method.name, cls.name);
+        const returnValue = generateEnhancedReturnValue(method.returnType, method.name, cls.name);
         code += `        ${method.returnType} result = ${returnValue};\n`;
         code += '        System.out.println("Returning: " + result);\n';
         code += '        return result;\n';
@@ -1252,85 +1252,310 @@ public class ${cls.name}Stub {\n`;
 };
 
 
-const generateRandomReturnValue = (
-  returnType: string,
-  methodName: string,
-  className: string
-): string => {
+//  return value generator based on data type
+const generateEnhancedReturnValue = (returnType: string, methodName: string, className: string): string => {
+  const lowerMethodName = methodName.toLowerCase();
+  const lowerClassName = className.toLowerCase();
 
-  const t = returnType.trim();
-  const lowerMethod = methodName.toLowerCase();
+  const randomInt = (min: number, max: number): number => {
+    return Math.floor(Math.random() * (max - min + 1)) + min;
+  };
 
-  /* ---------- primitives & boxed ---------- */
-  switch (t) {
-    case 'boolean':
-    case 'Boolean':
-      return 'java.util.concurrent.ThreadLocalRandom.current().nextBoolean()';
+  const randomFloat = (min: number, max: number, decimals: number = 2): number => {
+    return parseFloat((Math.random() * (max - min) + min).toFixed(decimals));
+  };
 
-    case 'byte':
-    case 'Byte':
-      return '(byte) java.util.concurrent.ThreadLocalRandom.current()'
-        + '.nextInt(Byte.MIN_VALUE, Byte.MAX_VALUE + 1)';
-
-    case 'short':
-    case 'Short':
-      return '(short) java.util.concurrent.ThreadLocalRandom.current()'
-        + '.nextInt(Short.MIN_VALUE, Short.MAX_VALUE + 1)';
-
-    case 'char':
-    case 'Character':
-      return "(char) java.util.concurrent.ThreadLocalRandom.current().nextInt('A', 'Z' + 1)";
-
-    case 'int':
-    case 'Integer':
-      return 'java.util.concurrent.ThreadLocalRandom.current().nextInt()';
-
-    case 'long':
-    case 'Long':
-      return 'java.util.concurrent.ThreadLocalRandom.current().nextLong()';
-
-    case 'float':
-    case 'Float':
-      return 'java.util.concurrent.ThreadLocalRandom.current().nextFloat()';
-
-    case 'double':
-    case 'Double':
-      return 'java.util.concurrent.ThreadLocalRandom.current().nextDouble()';
-
-    case 'String':
-      return `"${className}_${methodName}_" + java.util.UUID.randomUUID()`;
+  if (returnType === 'boolean' || returnType === 'Boolean') {
+    return Math.random() > 0.5 ? 'true' : 'false'; // 50/50 for generic boolean
   }
 
-  /* ---------- return blank set/array ---------- */
-  if (/(List|ArrayList)<.*>/.test(t)) return 'new java.util.ArrayList<>()';
-  if (/(Set|HashSet)<.*>/.test(t)) return 'new java.util.HashSet<>()';
-  if (/(Map|HashMap)<.*>/.test(t)) return 'new java.util.HashMap<>()';
-
-  /* ---------- handy common objects ---------- */
-  if (t.endsWith("Date")) return 'new java.util.Date()';
-  if (t.endsWith("BigDecimal")) return 'java.math.BigDecimal.ZERO';
-
-  /* ---------- attempt to instantiate any other class ---------- */
-  // Strip generics (Foo<Bar> → Foo) for the ctor test
-  const rawType = t.replace(/<.*>/, '').trim();
-
-  // Heuristic: looks like a concrete Java identifier, *and* isn’t obviously an interface
-  const looksInstantiable =
-    /^[A-Z][A-Za-z0-9_$.]*$/.test(rawType) &&   // PascalCase, no wildcards
-    !rawType.endsWith('Listener') &&
-    !rawType.endsWith('Callback');
-
-  if (looksInstantiable) {
-    return `new ${rawType}() /* generated for ${className}.${methodName} */`;
+  if (returnType === 'String') {
+    const randomSuffix = randomInt(1000, 9999);
+    if (lowerMethodName.includes('id') || lowerMethodName.includes('key')) {
+      return `"stub_${methodName.toLowerCase()}_${randomSuffix}"`;
+    } else if (lowerMethodName.includes('name')) {
+      const names = ['Alpha', 'Beta', 'Gamma', 'Delta', 'Epsilon'];
+      const randomName = names[randomInt(0, names.length - 1)];
+      return `"Stub${randomName}${randomSuffix}"`;
+    } else if (lowerMethodName.includes('status')) {
+      const statuses = ['ACTIVE', 'INACTIVE', 'PENDING', 'COMPLETED', 'PROCESSING'];
+      return `"${statuses[randomInt(0, statuses.length - 1)]}"`;
+    } else if (lowerMethodName.includes('message') || lowerMethodName.includes('error')) {
+      const messages = ['Success', 'Warning', 'Info', 'Error', 'Debug'];
+      return `"${messages[randomInt(0, messages.length - 1)]} message from ${methodName}"`;
+    } else if (lowerMethodName.includes('process') || lowerMethodName.includes('execute')) {
+      const results = ['SUCCESS', 'COMPLETED', 'PROCESSED', 'EXECUTED', 'FINISHED'];
+      return `"${results[randomInt(0, results.length - 1)]}"`;
+    }
+    return `"stub_${methodName.toLowerCase()}_${randomSuffix}"`;
   }
 
-  /* ---------- fallback ---------- */
-  return 'null';
+  // Numeric types with context awareness and randomness
+  if (['int', 'Integer'].includes(returnType)) {
+    if (lowerMethodName.includes('count') || lowerMethodName.includes('size')) {
+      return randomInt(1, 100).toString();
+    } else if (lowerMethodName.includes('id')) {
+      return randomInt(10000, 99999).toString();
+    } else if (lowerMethodName.includes('amount') || lowerMethodName.includes('total')) {
+      return randomInt(100, 10000).toString();
+    } else if (lowerMethodName.includes('age')) {
+      return randomInt(18, 80).toString();
+    } else if (lowerMethodName.includes('year')) {
+      return randomInt(2020, 2025).toString();
+    } else if (lowerMethodName.includes('month')) {
+      return randomInt(1, 12).toString();
+    } else if (lowerMethodName.includes('day')) {
+      return randomInt(1, 31).toString();
+    }
+    return randomInt(1, 1000).toString();
+  }
+
+  if (['long', 'Long'].includes(returnType)) {
+    if (lowerMethodName.includes('time') || lowerMethodName.includes('timestamp')) {
+      // Generate a timestamp within the last year
+      const now = Date.now();
+      const yearAgo = now - (365 * 24 * 60 * 60 * 1000);
+      return randomInt(yearAgo, now).toString() + 'L';
+    } else if (lowerMethodName.includes('id')) {
+      return randomInt(100000000, 999999999).toString() + 'L';
+    } else if (lowerMethodName.includes('bytes') || lowerMethodName.includes('size')) {
+      return randomInt(1024, 1073741824).toString() + 'L'; // 1KB to 1GB
+    }
+    return randomInt(1000, 100000).toString() + 'L';
+  }
+
+  if (['double', 'Double'].includes(returnType)) {
+    if (lowerMethodName.includes('amount') || lowerMethodName.includes('price') || lowerMethodName.includes('total')) {
+      return randomFloat(10.0, 9999.99).toString();
+    } else if (lowerMethodName.includes('rate') || lowerMethodName.includes('percent')) {
+      return randomFloat(0.01, 0.99).toString();
+    } else if (lowerMethodName.includes('temperature')) {
+      return randomFloat(-10.0, 40.0).toString();
+    } else if (lowerMethodName.includes('distance')) {
+      return randomFloat(0.1, 1000.0).toString();
+    } else if (lowerMethodName.includes('weight')) {
+      return randomFloat(0.5, 200.0).toString();
+    }
+    return randomFloat(1.0, 100.0).toString();
+  }
+
+  if (['float', 'Float'].includes(returnType)) {
+    if (lowerMethodName.includes('rate') || lowerMethodName.includes('percent')) {
+      return randomFloat(0.01, 0.99).toString() + 'f';
+    } else if (lowerMethodName.includes('ratio')) {
+      return randomFloat(0.1, 10.0).toString() + 'f';
+    } else if (lowerMethodName.includes('factor')) {
+      return randomFloat(0.5, 5.0).toString() + 'f';
+    }
+    return randomFloat(1.0, 100.0).toString() + 'f';
+  }
+
+  // Handle other primitive types with randomness
+  if (['byte', 'Byte'].includes(returnType)) {
+    return `(byte) ${randomInt(1, 127)}`;
+  }
+
+  if (['short', 'Short'].includes(returnType)) {
+    return `(short) ${randomInt(100, 32767)}`;
+  }
+
+  if (['char', 'Character'].includes(returnType)) {
+    const charCode = randomInt(65, 90); // A-Z
+    return `'${String.fromCharCode(charCode)}'`;
+  }
+
+  // Handle collection types 
+  if (returnType.includes('List') || returnType.includes('ArrayList')) {
+    return 'new java.util.ArrayList<>()';
+  }
+  if (returnType.includes('Set') || returnType.includes('HashSet')) {
+    return 'new java.util.HashSet<>()';
+  }
+  if (returnType.includes('Map') || returnType.includes('HashMap')) {
+    return 'new java.util.HashMap<>()';
+  }
+
+  // Handle common object types 
+  if (returnType.includes('Date')) {
+    return 'new java.util.Date()';
+  }
+  if (returnType.includes('BigDecimal')) {
+    const randomAmount = randomFloat(10.0, 9999.99);
+    return `new java.math.BigDecimal("${randomAmount}")`;
+  }
+
+  // Default for unknown object types
+  return 'null // TODO: Return appropriate stub object';
 };
 
 // Generate driver code
+// Generate driver code with random test values
 export const generateDriverCode = (driverClass: ClassInfo, targetClassName: string): string => {
   const packageLine = driverClass.packageName ? `package ${driverClass.packageName};\n\n` : '';
+
+  // Helper function to generate random integers within a range
+  const randomInt = (min: number, max: number): number => {
+    return Math.floor(Math.random() * (max - min + 1)) + min;
+  };
+
+  // Helper function to generate random floats within a range
+  const randomFloat = (min: number, max: number, decimals: number = 2): number => {
+    return parseFloat((Math.random() * (max - min) + min).toFixed(decimals));
+  };
+
+  // Helper function to generate random parameter values based on type and context
+  const generateRandomParameterValue = (paramType: string, paramName: string, index: number): { value: string, declaration: string } => {
+    const lowerParamName = paramName.toLowerCase();
+    let value: string;
+    let declaration: string;
+
+    switch (paramType) {
+      case 'int':
+      case 'Integer':
+        if (lowerParamName.includes('id')) {
+          value = randomInt(10000, 99999).toString();
+        } else if (lowerParamName.includes('count') || lowerParamName.includes('size')) {
+          value = randomInt(1, 100).toString();
+        } else if (lowerParamName.includes('amount') || lowerParamName.includes('total')) {
+          value = randomInt(100, 10000).toString();
+        } else if (lowerParamName.includes('age')) {
+          value = randomInt(18, 80).toString();
+        } else if (lowerParamName.includes('year')) {
+          value = randomInt(2020, 2025).toString();
+        } else if (lowerParamName.includes('month')) {
+          value = randomInt(1, 12).toString();
+        } else if (lowerParamName.includes('day')) {
+          value = randomInt(1, 31).toString();
+        } else {
+          value = randomInt(1, 1000).toString();
+        }
+        declaration = `${paramType} ${paramName} = ${value};`;
+        break;
+
+      case 'byte':
+      case 'Byte':
+        value = `(byte) ${randomInt(1, 127)}`;
+        declaration = `${paramType} ${paramName} = ${value};`;
+        break;
+
+      case 'short':
+      case 'Short':
+        value = `(short) ${randomInt(100, 32767)}`;
+        declaration = `${paramType} ${paramName} = ${value};`;
+        break;
+
+      case 'long':
+      case 'Long':
+        if (lowerParamName.includes('time') || lowerParamName.includes('timestamp')) {
+          const now = Date.now();
+          const yearAgo = now - (365 * 24 * 60 * 60 * 1000);
+          value = `${randomInt(yearAgo, now)}L`;
+        } else if (lowerParamName.includes('id')) {
+          value = `${randomInt(100000000, 999999999)}L`;
+        } else if (lowerParamName.includes('bytes') || lowerParamName.includes('size')) {
+          value = `${randomInt(1024, 1073741824)}L`; // 1KB to 1GB
+        } else {
+          value = `${randomInt(1000, 100000)}L`;
+        }
+        declaration = `${paramType} ${paramName} = ${value};`;
+        break;
+
+      case 'float':
+      case 'Float':
+        if (lowerParamName.includes('rate') || lowerParamName.includes('percent')) {
+          value = `${randomFloat(0.01, 0.99)}f`;
+        } else if (lowerParamName.includes('ratio')) {
+          value = `${randomFloat(0.1, 10.0)}f`;
+        } else if (lowerParamName.includes('factor')) {
+          value = `${randomFloat(0.5, 5.0)}f`;
+        } else {
+          value = `${randomFloat(1.0, 100.0)}f`;
+        }
+        declaration = `${paramType} ${paramName} = ${value};`;
+        break;
+
+      case 'double':
+      case 'Double':
+        if (lowerParamName.includes('amount') || lowerParamName.includes('price') || lowerParamName.includes('total')) {
+          value = randomFloat(10.0, 9999.99).toString();
+        } else if (lowerParamName.includes('rate') || lowerParamName.includes('percent')) {
+          value = randomFloat(0.01, 0.99).toString();
+        } else if (lowerParamName.includes('temperature')) {
+          value = randomFloat(-10.0, 40.0).toString();
+        } else if (lowerParamName.includes('distance')) {
+          value = randomFloat(0.1, 1000.0).toString();
+        } else if (lowerParamName.includes('weight')) {
+          value = randomFloat(0.5, 200.0).toString();
+        } else {
+          value = randomFloat(1.0, 100.0).toString();
+        }
+        declaration = `${paramType} ${paramName} = ${value};`;
+        break;
+
+      case 'boolean':
+      case 'Boolean':
+        if (lowerParamName.includes('valid') || lowerParamName.includes('active') || lowerParamName.includes('enabled')) {
+          value = Math.random() > 0.3 ? 'true' : 'false'; // 70% chance of true
+        } else if (lowerParamName.includes('flag') || lowerParamName.includes('check')) {
+          value = Math.random() > 0.5 ? 'true' : 'false'; // 50/50
+        } else {
+          value = Math.random() > 0.4 ? 'true' : 'false'; // 60% chance of true
+        }
+        declaration = `${paramType} ${paramName} = ${value};`;
+        break;
+
+      case 'char':
+      case 'Character':
+        // Generate random letter based on parameter name context
+        if (lowerParamName.includes('grade')) {
+          const grades = ['A', 'B', 'C', 'D', 'F'];
+          value = `'${grades[randomInt(0, grades.length - 1)]}'`;
+        } else if (lowerParamName.includes('type') || lowerParamName.includes('category')) {
+          const types = ['A', 'B', 'C', 'D', 'E'];
+          value = `'${types[randomInt(0, types.length - 1)]}'`;
+        } else {
+          const charCode = randomInt(65, 90); // A-Z
+          value = `'${String.fromCharCode(charCode)}'`;
+        }
+        declaration = `${paramType} ${paramName} = ${value};`;
+        break;
+
+      case 'String':
+        const randomSuffix = randomInt(1000, 9999);
+        if (lowerParamName.includes('id') || lowerParamName.includes('key')) {
+          value = `"test_${paramName.toLowerCase()}_${randomSuffix}"`;
+        } else if (lowerParamName.includes('name')) {
+          const names = ['Alpha', 'Beta', 'Gamma', 'Delta', 'Epsilon', 'Zeta', 'Theta'];
+          const randomName = names[randomInt(0, names.length - 1)];
+          value = `"Test${randomName}${randomSuffix}"`;
+        } else if (lowerParamName.includes('email')) {
+          value = `"test${randomSuffix}@example.com"`;
+        } else if (lowerParamName.includes('phone')) {
+          value = `"555-${randomInt(1000, 9999)}-${randomInt(1000, 9999)}"`;
+        } else if (lowerParamName.includes('address')) {
+          value = `"${randomInt(100, 9999)} Test Street, City ${randomSuffix}"`;
+        } else if (lowerParamName.includes('status')) {
+          const statuses = ['ACTIVE', 'INACTIVE', 'PENDING', 'COMPLETED', 'PROCESSING'];
+          value = `"${statuses[randomInt(0, statuses.length - 1)]}"`;
+        } else if (lowerParamName.includes('type') || lowerParamName.includes('category')) {
+          const types = ['TYPE_A', 'TYPE_B', 'TYPE_C', 'STANDARD', 'PREMIUM'];
+          value = `"${types[randomInt(0, types.length - 1)]}"`;
+        } else if (lowerParamName.includes('message') || lowerParamName.includes('description')) {
+          const messages = ['Test message', 'Sample description', 'Random text', 'Generated content'];
+          value = `"${messages[randomInt(0, messages.length - 1)]} ${randomSuffix}"`;
+        } else {
+          value = `"testValue${randomSuffix}"`;
+        }
+        declaration = `String ${paramName} = ${value};`;
+        break;
+
+      default:
+        value = 'null';
+        declaration = `${paramType} ${paramName} = null; // TODO: Initialize with appropriate test data`;
+    }
+
+    return { value: paramName, declaration };
+  };
 
   let code = `${packageLine}import org.junit.Test;
 import static org.junit.Assert.*;
@@ -1352,65 +1577,13 @@ public class ${driverClass.name}Driver {
       const methodName = method.name.charAt(0).toUpperCase() + method.name.slice(1);
       code += `    @Test\n    public void test${methodName}CallsTo${targetClassName}() {\n`;
 
-      // Generate parameter values for the driver method
+      // Generate random parameter values for the driver method
       const paramValues: string[] = [];
       const paramDeclarations: string[] = [];
 
       method.parameters.forEach((param, idx) => {
-        let declaration: string;
-        let value: string;
-
-        switch (param.type) {
-          case 'int':
-          case 'Integer':
-            value = `${(idx + 1) * 10}`;
-            declaration = `${param.type} ${param.name} = ${value};`;
-            break;
-          case 'byte':
-          case 'Byte':
-            value = `(byte) ${idx + 1}`;
-            declaration = `${param.type} ${param.name} = ${value};`;
-            break;
-          case 'short':
-          case 'Short':
-            value = `(short) ${(idx + 1) * 100}`;
-            declaration = `${param.type} ${param.name} = ${value};`;
-            break;
-          case 'long':
-          case 'Long':
-            value = `${(idx + 1) * 1000}L`;
-            declaration = `${param.type} ${param.name} = ${value};`;
-            break;
-          case 'float':
-          case 'Float':
-            value = `${(idx + 1) * 1.5}f`;
-            declaration = `${param.type} ${param.name} = ${value};`;
-            break;
-          case 'double':
-          case 'Double':
-            value = `${(idx + 1) * 2.5}`;
-            declaration = `${param.type} ${param.name} = ${value};`;
-            break;
-          case 'boolean':
-          case 'Boolean':
-            value = idx % 2 === 0 ? 'true' : 'false';
-            declaration = `${param.type} ${param.name} = ${value};`;
-            break;
-          case 'char':
-          case 'Character':
-            value = `'${String.fromCharCode(65 + idx)}'`; // A, B, C, etc.
-            declaration = `${param.type} ${param.name} = ${value};`;
-            break;
-          case 'String':
-            value = `"testValue${idx + 1}"`;
-            declaration = `String ${param.name} = ${value};`;
-            break;
-          default:
-            value = 'null';
-            declaration = `${param.type} ${param.name} = null; // TODO: Initialize with appropriate test data`;
-        }
-
-        paramValues.push(param.name);
+        const { value, declaration } = generateRandomParameterValue(param.type, param.name, idx);
+        paramValues.push(value);
         paramDeclarations.push(declaration);
       });
 
@@ -1422,6 +1595,7 @@ public class ${driverClass.name}Driver {
       code += `
         // This test simulates how ${driverClass.name}.${method.name}() would call ${targetClassName}
         // We're testing ${targetClassName} through the perspective of ${driverClass.name}
+        // Using random test data for more comprehensive testing
         
         try {
             // Step 1: Verify our target object exists and is ready
@@ -1440,6 +1614,7 @@ public class ${driverClass.name}Driver {
             // TODO: Add assertions for the result and ${targetClassName} state
             System.out.println("${driverClass.name}.${method.name}() returned: " + result);
             System.out.println("${targetClassName} was successfully called by ${driverClass.name}.${method.name}()");
+            System.out.println("Test executed with random parameters: ${method.parameters.map(p => p.name).join(', ')}");
 `;
       } else {
         code += `driverObject.${method.name}(${paramValues.join(', ')});
@@ -1448,6 +1623,7 @@ public class ${driverClass.name}Driver {
             // TODO: Add assertions to verify ${targetClassName} state
             System.out.println("${driverClass.name}.${method.name}() successfully executed");
             System.out.println("${targetClassName} was successfully called by ${driverClass.name}.${method.name}()");
+            System.out.println("Test executed with random parameters: ${method.parameters.map(p => p.name).join(', ')}");
 `;
       }
 
@@ -1471,17 +1647,24 @@ public class ${driverClass.name}Driver {
     code += '    }\n\n';
   }
 
-  // Add an integration test
+  // Add an integration test with random data
   code += `    @Test\n    public void test${driverClass.name}And${targetClassName}Integration() {\n`;
   code += `        // Integration test: Verify ${driverClass.name} and ${targetClassName} work together\n`;
+  code += `        // Using random test data for more robust testing\n`;
   code += `        try {\n`;
   code += `            assertNotNull(driverObject);\n`;
   code += `            assertNotNull(targetObject);\n`;
+  code += `            \n`;
+  code += `            // Generate some random test values for integration testing\n`;
+  code += `            int randomId = ${randomInt(10000, 99999)};\n`;
+  code += `            String randomData = "integrationTest_" + ${randomInt(1000, 9999)};\n`;
+  code += `            boolean randomFlag = ${Math.random() > 0.5 ? 'true' : 'false'};\n`;
   code += `            \n`;
   code += `            // TODO: Add comprehensive integration test logic\n`;
   code += `            // Test the complete interaction flow between ${driverClass.name} and ${targetClassName}\n`;
   code += `            \n`;
   code += `            System.out.println("Integration test passed: ${driverClass.name} <-> ${targetClassName}");\n`;
+  code += `            System.out.println("Test used random values - ID: " + randomId + ", Data: " + randomData + ", Flag: " + randomFlag);\n`;
   code += `        } catch (Exception e) {\n`;
   code += `            fail("Integration test failed: " + e.getMessage());\n`;
   code += `        }\n`;

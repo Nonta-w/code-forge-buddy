@@ -302,7 +302,6 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
           if (fromObj && toObj && fromObj.type && toObj.type) {
             console.log(`Analyzing message: "${message.name}" from ${fromObj.type} to ${toObj.type}, type: ${message.type}`);
 
-            // FIXED: Better detection of call vs return messages
             const isReturnMessage = detectReturnMessage(message, fromObj, toObj);
 
             if (isReturnMessage) {
@@ -438,7 +437,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
         if (messageName.includes('(') && messageName.includes(')')) {
           console.log(`    → Has parentheses, analyzing...`);
 
-          // 4a. FIXED: Specific return action patterns (only specific methods that are clearly return actions)
+          // 4a. Specific return action patterns (only specific methods that are clearly return actions)
           const returnActionPatterns = [
             /\.(send|emit|publish|notify)\s*\(/i,                       // Communication methods
             /\.(log|trace|debug|info|warn|error|print|println)\s*\(/i, // Logging methods
@@ -452,8 +451,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
             }
           }
 
-          // 4b. FIXED: State change methods - need context analysis
-          // Only consider these as return actions if they're clearly side effects
+          // 4b. State change methods - need context analysis
           const contextualReturnPatterns = [
             /\.(update|set|put|add|remove|delete|clear|reset)\s*\(/i,   // State change methods
             /\.(save|persist|store|write|flush)\s*\(/i,                 // Persistence methods
@@ -552,7 +550,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
       console.log('Call graph:', callGraph);
       console.log('Selected classes for testing:', selectedClassNames);
 
-      // FIXED: Collect all needed stubs and drivers FIRST, then generate them
+      // Collect all needed stubs and drivers FIRST, then generate them
       const neededStubs = new Set<string>();
       const neededDrivers = new Set<string>();
 

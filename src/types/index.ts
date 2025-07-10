@@ -65,7 +65,7 @@ export interface Message {
 export interface Reference {
   id: string;
   name: string;
-  diagramName?: string; // ADD THIS FIELD - this is the key fix
+  diagramName?: string;
 }
 
 export interface GeneratedCode {
